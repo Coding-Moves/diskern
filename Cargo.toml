@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/diskern-core",
+    "crates/diskern-cli",
+    "app/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Coding-Moves/diskern"
+
+[workspace.dependencies]
+# Shared across crates — keep versions in one place
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Scanning & hashing
+blake3 = { version = "1", features = ["rayon", "mmap"] }
+jwalk = "0.8"
+rayon = "1"
+
+# Core data structures
+petgraph = "0.6"
+dashmap = "6"
+
+[profile.release]
+lto = "thin"
+strip = true

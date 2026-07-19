@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+      # Core + CLI only: building the Tauri crate needs webkitgtk, which CI
+      # for library tests doesn't need. The release workflow covers the app.
+      - run: cargo fmt --check
+      - run: cargo clippy -p diskern-core -p diskern-cli -- -D warnings
+      - run: cargo test -p diskern-core -p diskern-cli

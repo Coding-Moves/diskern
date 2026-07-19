@@ -1,0 +1,16 @@
+/* Deliberately unstyled-adjacent. Real design pass comes later —
+   the skeleton's job is correctness, not looks. */
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; }
+.shell { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+.tagline { opacity: 0.7; margin-top: -0.5rem; }
+.empty { text-align: center; padding: 4rem 0; }
+button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
+.error { color: #c0392b; }
+.findings { list-style: none; padding: 0; display: grid; gap: 0.4rem; }
+.findings li { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 1rem; padding: 0.5rem 0.75rem; border: 1px solid rgba(128,128,128,.3); border-radius: 6px; }
+.path { font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.badge { font-size: 0.78rem; align-self: start; }
+.why { grid-column: 1 / -1; font-size: 0.82rem; opacity: 0.75; }
+.verdict-protected .badge { color: #c0392b; font-weight: 600; }
+.verdict-safe .badge { color: #27ae60; }
