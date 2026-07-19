@@ -55,8 +55,9 @@ mod tests {
     #[test]
     fn embedded_db_parses_and_protects_driverstore() {
         let db = RulesDb::embedded();
-        let (cat, verdict, _) =
-            db.classify(std::path::Path::new("C:/Windows/System32/DriverStore/x.inf"));
+        let (cat, verdict, _) = db.classify(std::path::Path::new(
+            "C:/Windows/System32/DriverStore/x.inf",
+        ));
         assert_eq!(cat, Category::SystemCritical);
         assert_eq!(verdict, Verdict::Protected);
     }

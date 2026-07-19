@@ -37,7 +37,11 @@ pub fn build(mut entries: Vec<FileEntry>, rules: &RulesDb) -> Report {
         reasons.extend(assessment.reasons);
 
         findings.push(Finding {
-            reclaimable: if verdict == Verdict::Protected { 0 } else { entry.size },
+            reclaimable: if verdict == Verdict::Protected {
+                0
+            } else {
+                entry.size
+            },
             entry,
             category,
             verdict,

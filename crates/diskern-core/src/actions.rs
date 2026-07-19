@@ -36,9 +36,7 @@ pub fn quarantine(
 
     // Flatten path into a unique quarantine filename.
     let stamp = now_epoch();
-    let flat = file
-        .to_string_lossy()
-        .replace(['/', '\\', ':'], "_");
+    let flat = file.to_string_lossy().replace(['/', '\\', ':'], "_");
     let dest = quarantine_dir.join(format!("{stamp}_{flat}"));
 
     // rename() fails across filesystems; fall back to copy+remove.
@@ -64,7 +62,10 @@ pub fn restore(record: &QuarantineRecord) -> Result<()> {
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> GenomeError {
-    GenomeError::Io { path: path.to_path_buf(), source }
+    GenomeError::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 fn now_epoch() -> i64 {

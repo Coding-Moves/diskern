@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "diskern", about = "Diskern — understand your disk before you clean it")]
+#[command(
+    name = "diskern",
+    about = "Diskern — understand your disk before you clean it"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -27,7 +30,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Scan { roots, json } => {
-            let opts = scanner::ScanOptions { roots, ..Default::default() };
+            let opts = scanner::ScanOptions {
+                roots,
+                ..Default::default()
+            };
             let progress = Arc::new(scanner::ScanProgress::default());
             let entries = scanner::scan(&opts, progress)?;
             let report = report::build(entries, &RulesDb::embedded());

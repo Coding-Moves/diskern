@@ -61,7 +61,9 @@ impl ImpactGraph {
     /// How many project roots reference this path (directly, v0)?
     /// This number feeds risk::downgrade — the "breaks 17 projects" number.
     pub fn referencing_projects(&self, path: &std::path::Path) -> usize {
-        let Some(&ix) = self.index.get(path) else { return 0 };
+        let Some(&ix) = self.index.get(path) else {
+            return 0;
+        };
         self.graph
             .neighbors_directed(ix, petgraph::Direction::Incoming)
             .filter(|&n| matches!(self.graph[n], Node::ProjectRoot { .. }))

@@ -17,13 +17,13 @@
 //!                                        (optional) ai narration
 //! ```
 
-pub mod scanner;
-pub mod dedup;
-pub mod rules;
-pub mod risk;
-pub mod graph;
 pub mod actions;
+pub mod dedup;
+pub mod graph;
 pub mod report;
+pub mod risk;
+pub mod rules;
+pub mod scanner;
 
 #[cfg(feature = "ai")]
 pub mod ai;
@@ -49,14 +49,14 @@ pub struct FileEntry {
 #[serde(rename_all = "snake_case")]
 pub enum Category {
     BrowserCache,
-    BuildArtifact,   // target/, node_modules/, __pycache__/ ...
+    BuildArtifact, // target/, node_modules/, __pycache__/ ...
     PackageManagerCache,
     TempFile,
     Log,
     Installer,
     DuplicateFile,
     EmptyDirectory,
-    SystemCritical,  // driver stores, OS components — never touch
+    SystemCritical, // driver stores, OS components — never touch
     Unknown,
 }
 
