@@ -62,7 +62,7 @@ pub fn find_duplicates(entries: &mut [FileEntry]) -> Vec<DuplicateSet> {
         })
         .collect();
 
-    sets.sort_by(|a, b| b.wasted.cmp(&a.wasted)); // biggest wins first
+    sets.sort_by_key(|s| std::cmp::Reverse(s.wasted)); // biggest wins first
     sets
 }
 

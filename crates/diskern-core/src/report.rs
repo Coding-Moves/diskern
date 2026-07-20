@@ -53,7 +53,7 @@ pub fn build(mut entries: Vec<FileEntry>, rules: &RulesDb) -> Report {
     let total_reclaimable = findings.iter().map(|f| f.reclaimable).sum::<u64>()
         + duplicate_sets.iter().map(|d| d.wasted).sum::<u64>();
 
-    findings.sort_by(|a, b| b.reclaimable.cmp(&a.reclaimable));
+    findings.sort_by_key(|f| std::cmp::Reverse(f.reclaimable));
 
     Report {
         findings,
