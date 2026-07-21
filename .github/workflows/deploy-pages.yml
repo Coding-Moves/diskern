@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
     paths: ["site/**", ".github/workflows/deploy-pages.yml"]
+  # Re-deploy (and refresh the cached release snapshot) when a release is
+  # published, and once a day to catch edits/deletions.
+  release:
+    types: [published]
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -29,6 +35,29 @@ jobs:
 
       - run: npm ci
         working-directory: site
+
+      # Fetch the latest release SERVER-SIDE with the workflow token and bake
+      # it into the site as a static file. Visitors then read this same-origin
+      # snapshot instead of hitting GitHub's anonymous API (60 req/hour/IP),
+      # which was returning 403s and showing the error fallback. Authenticated
+      # requests have a far higher limit, so this never rate-limits.
+      # If there's no published release (or the fetch fails) we leave the file
+      # absent and the site falls back to the live API at runtime.
+      - name: Cache latest release as a static file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if curl -sf \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+              -o site/public/latest-release.json; then
+            echo "Cached release: $(node -p "require('./site/public/latest-release.json').tag_name")"
+          else
+            echo "No published release or fetch failed; site will use the live API fallback."
+            rm -f site/public/latest-release.json
+          fi
 
       - run: npm run build
         working-directory: site
