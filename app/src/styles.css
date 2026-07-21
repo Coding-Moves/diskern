@@ -7,10 +7,98 @@ body { margin: 0; }
 .empty { text-align: center; padding: 4rem 0; }
 button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .error { color: #c0392b; }
-.findings { list-style: none; padding: 0; display: grid; gap: 0.4rem; }
-.findings li { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 1rem; padding: 0.5rem 0.75rem; border: 1px solid rgba(128,128,128,.3); border-radius: 6px; }
-.path { font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
-.badge { font-size: 0.78rem; align-self: start; }
+
+.summary { line-height: 1.5; }
+.scanned-folder { font-family: ui-monospace, monospace; font-size: 0.85rem; opacity: 0.7; }
+
+/* Collapsible verdict/category groups */
+.verdict-group { margin-top: 1.25rem; }
+.group-header {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.25rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.chevron { width: 1rem; opacity: 0.6; }
+.group-meta { margin-left: auto; font-weight: 400; opacity: 0.7; font-size: 0.85rem; }
+.group-body { padding: 0.25rem 0 0.5rem; }
+.category-block h4 { margin: 0.75rem 0 0.25rem; font-size: 0.85rem; opacity: 0.8; }
+
+/* Finding rows */
+.findings { list-style: none; padding: 0; margin: 0.3rem 0 0; display: grid; gap: 0.4rem; }
+.finding {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.2rem 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+}
+.path { grid-column: 1; font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.size { grid-column: 2; font-size: 0.82rem; opacity: 0.8; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-action { grid-column: 3; justify-self: end; }
 .why { grid-column: 1 / -1; font-size: 0.82rem; opacity: 0.75; }
-.verdict-protected .badge { color: #c0392b; font-weight: 600; }
-.verdict-safe .badge { color: #27ae60; }
+
+/* Quarantine action (safe/review rows only) */
+.quarantine-btn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 5px;
+  background: none;
+  white-space: nowrap;
+}
+.confirm { display: inline-flex; align-items: center; gap: 0.4rem; }
+.confirm-q { font-size: 0.8rem; opacity: 0.8; }
+.confirm-yes { border-color: #c0392b; color: #c0392b; }
+.confirm-no { padding: 0.3rem 0.6rem; font-size: 0.82rem; background: none; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 5px; }
+.working { font-size: 0.82rem; opacity: 0.7; }
+.row-error {
+  grid-column: 1 / -1;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: #c0392b;
+  overflow-wrap: anywhere;
+}
+
+/* Duplicate sets */
+.dup-set { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border: 1px solid rgba(128, 128, 128, 0.3); border-radius: 6px; }
+.dup-set-header { font-size: 0.82rem; opacity: 0.85; }
+.dup-paths { list-style: none; padding: 0.3rem 0 0; margin: 0; }
+.dup-paths li { font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.7; overflow-wrap: anywhere; }
+
+/* Live scan progress */
+.scan-progress { max-width: 360px; margin: 1rem auto 0; }
+.progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.2);
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill-indeterminate {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #3498db, transparent);
+  animation: indeterminate 1.3s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+.progress-count {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
