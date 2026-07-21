@@ -15,7 +15,7 @@ const OS_ICONS = {
 }
 
 export default function Downloads() {
-  const { status, release } = useLatestRelease()
+  const { status, release, error } = useLatestRelease()
   const visitorOS = useMemo(() => detectOS(), [])
 
   return (
@@ -28,7 +28,7 @@ export default function Downloads() {
 
       <div className="downloads-card">
         {status === 'loading' && <LoadingState />}
-        {status === 'error' && <FallbackState />}
+        {status === 'error' && <FallbackState error={error} />}
         {status === 'success' && (
           <ReleaseState release={release} visitorOS={visitorOS} />
         )}
@@ -46,13 +46,14 @@ function LoadingState() {
   )
 }
 
-function FallbackState() {
+function FallbackState({ error }) {
   return (
     <div className="downloads-fallback">
       <p>
         Couldn't load the latest release automatically — GitHub's API limits
         anonymous requests, or your connection blipped.
       </p>
+      {error && <p className="downloads-fallback-detail">({error})</p>}
       <p>
         <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer">
           <DownloadIcon style={{ width: 16, height: 16, display: 'inline', verticalAlign: '-3px' }} />

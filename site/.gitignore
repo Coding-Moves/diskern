@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated at deploy time by the workflow (see deploy-pages.yml).
+public/latest-release.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
