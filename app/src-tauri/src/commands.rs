@@ -44,7 +44,10 @@ pub async fn start_scan(window: Window, roots: Vec<PathBuf>) -> Result<report::R
 
     let progress_for_scan = progress.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let opts = scanner::ScanOptions { roots, ..Default::default() };
+        let opts = scanner::ScanOptions {
+            roots,
+            ..Default::default()
+        };
         let entries = scanner::scan(&opts, progress_for_scan).map_err(|e| e.to_string())?;
         Ok::<_, String>(report::build(entries, &RulesDb::embedded()))
     })
@@ -76,7 +79,10 @@ pub async fn quarantine_finding(
     tauri::async_runtime::spawn_blocking(move || {
         let (_, verdict, _) = RulesDb::embedded().classify(&path);
         if matches!(verdict, Verdict::Protected | Verdict::Risky) {
-            return Err(format!("{} is classified {verdict:?}; action refused", path.display()));
+            return Err(format!(
+                "{} is classified {verdict:?}; action refused",
+                path.display()
+            ));
         }
         actions::quarantine(&path, verdict, &quarantine_dir).map_err(|e| e.to_string())
     })
