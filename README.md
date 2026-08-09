@@ -44,4 +44,4 @@ updater-key secrets once, then `git tag vX.Y.Z && git push --tags`.
 
 ## License
 
-MIT OR Apache-2.0
+MIT 
