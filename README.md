@@ -24,6 +24,7 @@ would break if you did.
 crates/diskern-core   engine: scanner, dedup (BLAKE3), rules, risk, graph, quarantine
 crates/diskern-cli    `diskern scan <dir>` — the engine from the terminal
 app/                 Tauri v2 desktop app (React frontend)
+
 ```
 
 ## Development
@@ -45,3 +46,5 @@ updater-key secrets once, then `git tag vX.Y.Z && git push --tags`.
 ## License
 
 MIT 
+
+
