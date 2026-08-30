@@ -13,6 +13,12 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # Majors that must move together — one PR per family, so a react or
+      # vite major never arrives as two mutually-red halves again.
+      react:
+        patterns: ["react", "react-dom", "@types/react*"]
+      vite:
+        patterns: ["vite", "@vitejs/*"]
       npm-minor:
         update-types: [minor, patch]
 
@@ -21,6 +27,10 @@ updates:
     schedule:
       interval: weekly
     groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react*"]
+      vite:
+        patterns: ["vite", "@vitejs/*"]
       npm-minor:
         update-types: [minor, patch]
 
