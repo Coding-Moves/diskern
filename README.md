@@ -1,5 +1,8 @@
 # Diskern
 
+[![CI](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml/badge.svg)](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](README.md#license)
+
 **Understand your disk before you clean it.**
 
 Diskern scans your computer, understands what every file is *for*, and
