@@ -60,7 +60,7 @@ jobs:
           releaseName: "Diskern ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
 
   # Placeholder: once accepted by SignPath Foundation, add their signing
