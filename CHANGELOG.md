@@ -6,6 +6,10 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Relicensed from MIT OR Apache-2.0 to MIT only
+
 ### Added
 
 - Dual MIT OR Apache-2.0 licensing with in-repo license texts
