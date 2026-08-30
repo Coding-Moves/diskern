@@ -31,7 +31,9 @@ site/                 landing page (GitHub Pages)
 docs/                 architecture and release docs
 ```
 
-Each section has its own README:
+Project docs live in [docs/](docs/README.md) — architecture, the
+[rules database](docs/RULES.md), an [FAQ](docs/FAQ.md), and release
+instructions. Each section has its own README:
 [core](crates/diskern-core/README.md) ·
 [cli](crates/diskern-cli/README.md) ·
 [app](app/README.md) ·
