@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to the same PR cancels the still-running previous run —
+# no point finishing checks for a commit that's already been superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-22.04
