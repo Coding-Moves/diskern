@@ -23,9 +23,16 @@ would break if you did.
 ```
 crates/diskern-core   engine: scanner, dedup (BLAKE3), rules, risk, graph, quarantine
 crates/diskern-cli    `diskern scan <dir>` — the engine from the terminal
-app/                 Tauri v2 desktop app (React frontend)
-
+app/                  Tauri v2 desktop app (React frontend)
+site/                 landing page (GitHub Pages)
+docs/                 architecture and release docs
 ```
+
+Each section has its own README:
+[core](crates/diskern-core/README.md) ·
+[cli](crates/diskern-cli/README.md) ·
+[app](app/README.md) ·
+[site](site/README.md)
 
 ## Development
 
@@ -43,8 +50,20 @@ cd app && npm install && npm run tauri dev
 See [docs/RELEASING.md](docs/RELEASING.md). Short version: set the two
 updater-key secrets once, then `git tag vX.Y.Z && git push --tags`.
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup and guidelines, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for how the pieces fit together.
+
 ## License
 
-MIT 
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this work by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions. 
 
 
