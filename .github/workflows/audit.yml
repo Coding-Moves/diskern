@@ -1,0 +1,39 @@
+# Slow-moving checks that shouldn't block every PR: dependency
+# vulnerability audit and external-link rot. Run weekly, on manual
+# dispatch, and whenever the Rust lockfile changes.
+name: Audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [Cargo.lock]
+  pull_request:
+    paths: [Cargo.lock]
+
+jobs:
+  # RustSec advisory check over Cargo.lock.
+  cargo-audit:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write # the action files an issue for new advisories on scheduled runs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # External links in docs — checked here (not per-PR) so a flaky or
+  # rate-limiting third-party site can't fail unrelated PRs.
+  external-links:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --accept '200..=299,429' './**/*.md'
+          fail: true
