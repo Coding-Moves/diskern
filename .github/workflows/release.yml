@@ -47,7 +47,7 @@ jobs:
         working-directory: app
 
       - name: Build, sign updater artifacts, upload release + latest.json
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # From `npm run tauri signer generate` — see docs/RELEASING.md.
