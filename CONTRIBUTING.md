@@ -34,10 +34,10 @@ See each section's README for details:
 
 ## Adding safety rules
 
-Rules live in [`crates/diskern-core/rules/base.json`](crates/diskern-core/rules/base.json).
-Every rule needs an `id`, a match pattern, a category, and a risk verdict.
-Prefer conservative verdicts — when in doubt, mark it `Unknown` rather
-than safe-to-remove.
+Rules live in [`crates/diskern-core/rules/base.json`](crates/diskern-core/rules/base.json)
+and are the main way to contribute — see [docs/RULES.md](docs/RULES.md)
+for the format, verdict levels, and guidelines. Prefer conservative
+verdicts: when in doubt, use `review` rather than `safe`.
 
 ## Reporting bugs
 
