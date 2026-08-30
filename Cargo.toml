@@ -23,7 +23,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Scanning & hashing
 blake3 = { version = "1", features = ["rayon", "mmap"] }
-jwalk = "0.8"
+jwalk = "0.9"
 rayon = "1"
 
 # Core data structures
