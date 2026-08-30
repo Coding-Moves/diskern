@@ -1,5 +1,8 @@
 # Diskern
 
+[![CI](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml/badge.svg)](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](README.md#license)
+
 **Understand your disk before you clean it.**
 
 Diskern scans your computer, understands what every file is *for*, and
@@ -28,7 +31,9 @@ site/                 landing page (GitHub Pages)
 docs/                 architecture and release docs
 ```
 
-Each section has its own README:
+Project docs live in [docs/](docs/README.md) — architecture, the
+[rules database](docs/RULES.md), an [FAQ](docs/FAQ.md), and release
+instructions. Each section has its own README:
 [core](crates/diskern-core/README.md) ·
 [cli](crates/diskern-cli/README.md) ·
 [app](app/README.md) ·

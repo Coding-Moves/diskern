@@ -1,0 +1,6 @@
+# Default reviewers for all changes.
+* @Muawiya-contact
+
+# Safety-critical: the rules database and the only file-mutating module.
+/crates/diskern-core/rules/ @Muawiya-contact
+/crates/diskern-core/src/actions.rs @Muawiya-contact
