@@ -33,3 +33,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: crate-ci/typos@v1
+
+  # Validate relative links between markdown docs (offline = deterministic;
+  # external-link rot is checked weekly in audit.yml instead, so a flaky
+  # third-party site can't fail an unrelated PR).
+  doc-links:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --include-fragments --no-progress './**/*.md'
+          fail: true
