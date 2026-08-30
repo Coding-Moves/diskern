@@ -32,6 +32,12 @@ See each section's README for details:
 3. `cargo test --workspace` — all tests green.
 4. Keep commits small and focused; one logical change per commit.
 
+CI runs the same checks on every PR, plus a spell checker
+([typos](https://github.com/crate-ci/typos), config in `_typos.toml`),
+a markdown link checker, and lint/build of the site and app frontends.
+A weekly audit workflow additionally scans dependencies for RustSec
+advisories and docs for dead external links.
+
 ## Adding safety rules
 
 Rules live in [`crates/diskern-core/rules/base.json`](crates/diskern-core/rules/base.json)
