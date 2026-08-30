@@ -38,7 +38,8 @@ jobs:
   # external-link rot is checked weekly in audit.yml instead, so a flaky
   # third-party site can't fail an unrelated PR).
   doc-links:
-    runs-on: ubuntu-22.04
+    # ubuntu-latest, not 22.04: the prebuilt lychee binary needs glibc >= 2.38
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: lycheeverse/lychee-action@v2
