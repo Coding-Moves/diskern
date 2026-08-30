@@ -25,3 +25,11 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -p diskern-core -p diskern-cli -- -D warnings
       - run: cargo test -p diskern-core -p diskern-cli
+
+  # Spell-check code, docs, and comments. Config in _typos.toml.
+  # Failures annotate the exact line in the PR diff.
+  typos:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@v1

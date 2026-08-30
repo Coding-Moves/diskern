@@ -1,0 +1,15 @@
+# Config for the `typos` spell checker (runs in CI, see ci.yml).
+# Docs: https://github.com/crate-ci/typos
+
+[files]
+extend-exclude = [
+    "*.lock",
+    "package-lock.json",
+    "app/src-tauri/icons/",
+    "site/public/",
+]
+
+[default.extend-words]
+# Project and people names the dictionary would "correct".
+diskern = "diskern"
+Muawiya = "Muawiya"
