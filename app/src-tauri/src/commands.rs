@@ -101,6 +101,25 @@ pub async fn start_scan(
     joined.map_err(|e| e.to_string())?
 }
 
+/// Stop the scan that is currently running.
+///
+/// Returns whether there was one to stop. A cancel that arrives after the
+/// walk has already finished is a no-op, not an error — the UI can race
+/// this against the scan completing and doesn't need to care who won.
+///
+/// Read-only, like `start_scan`: setting the flag makes the walk return
+/// early. Nothing is written, moved, or deleted.
+#[tauri::command]
+pub fn cancel_scan(state: State<'_, ActiveScan>) -> bool {
+    match state.slot().as_ref() {
+        Some(progress) => {
+            progress.cancel();
+            true
+        }
+        None => false,
+    }
+}
+
 /// The ONLY mutating command. Re-classifies server-side before acting —
 /// the frontend's claimed verdict is never trusted.
 #[tauri::command]

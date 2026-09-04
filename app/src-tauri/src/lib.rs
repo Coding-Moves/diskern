@@ -17,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_scan,
+            commands::cancel_scan,
             commands::quarantine_finding,
         ])
         .run(tauri::generate_context!())
