@@ -78,6 +78,46 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "$vulns vulnerabilities, $warns warnings"
 
+      # printf with single quotes throughout: the body is full of markdown
+      # backticks, which bash would otherwise read as command substitution.
+      - name: Render the advisory summary
+        if: steps.audit.outputs.total != '0'
+        env:
+          VULNS: ${{ steps.audit.outputs.vulnerabilities }}
+          WARNS: ${{ steps.audit.outputs.warnings }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            printf '`cargo audit` found **%s** vulnerabilities and **%s** warnings in `Cargo.lock`.\n\n' \
+              "$VULNS" "$WARNS"
+            jq -r '
+              (.vulnerabilities.list[]? |
+                "- **\(.advisory.id)** — `\(.package.name) \(.package.version)`: \(.advisory.title)"),
+              ((.warnings // {}) | to_entries[] | .key as $kind | .value[] |
+                "- _\($kind)_ **\(.advisory.id // "no id")** — `\(.package.name) \(.package.version)`: \(.advisory.title // "no advisory metadata")")
+            ' audit.json
+            printf '\nReproduce with `cargo audit` locally. The **Dependency auto-fix**\n'
+            printf 'workflow runs an hour after this one and opens an update PR when a\n'
+            printf 'newer version clears the advisory.\n\n'
+            printf '<sub>Filed automatically by [this run](%s). Updated in place while the\n' "$RUN_URL"
+            printf 'advisories stand, and closed once the audit comes back clean.</sub>\n'
+          } > issue-body.md
+          cat issue-body.md
+
+      - name: File or refresh the tracking issue
+        if: steps.audit.outputs.total != '0'
+        run: |
+          number=$(gh issue list --state open --label automated-issue \
+            --json number,title \
+            --jq '[.[] | select(.title == $ENV.ISSUE_TITLE) | .number] | first // empty')
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file issue-body.md
+            echo "Refreshed #$number"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file issue-body.md \
+              --label security --label automated-issue
+          fi
+
   # External links in docs — checked here (not per-PR) so a flaky or
   # rate-limiting third-party site can't fail unrelated PRs.
   external-links:
