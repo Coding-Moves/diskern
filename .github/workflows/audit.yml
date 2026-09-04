@@ -15,12 +15,15 @@ on:
     paths: [Cargo.lock]
 
 jobs:
-  # RustSec advisory check over Cargo.lock.
+  # PR-time advisory check: annotates the changed lockfile inline so the
+  # author sees the advisory in the diff. PRs only — off-PR runs are handled
+  # by `advisory-issue` below, which files a labelled tracking issue instead.
   cargo-audit:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
     permissions:
       contents: read
-      issues: write # the action files an issue for new advisories on scheduled runs
+      checks: write # the action reports advisories as a check run
     steps:
       - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2
