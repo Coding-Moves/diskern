@@ -6,10 +6,6 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
-
-- Licensed under MIT
-
 ### Added
 
 - Automated RUSTSEC auditing: a weekly `cargo audit` that files and closes
@@ -17,6 +13,10 @@ All notable changes to Diskern are documented here. The format follows
   dependency-update PR when an advisory lands
 - Community docs: contributing guide, code of conduct, security policy
 - Per-section READMEs and an architecture overview
+
+### Changed
+
+- Licensed under MIT
 
 ## [0.1.0]
 
