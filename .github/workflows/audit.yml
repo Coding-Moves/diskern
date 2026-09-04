@@ -30,6 +30,45 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Off-PR runs own a single tracking issue for the whole lockfile: one
+  # issue, kept current, rather than a fresh one every Monday.
+  advisory-issue:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_TITLE: RUSTSEC advisories in Cargo.lock
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run cargo audit
+        id: audit
+        run: |
+          # A non-zero exit only means "found something" — the case we most
+          # need to keep running for — so read the report, not the status.
+          cargo audit --json > audit.json || true
+          jq -e . audit.json > /dev/null || {
+            echo "::error::cargo audit produced no parsable JSON report"
+            exit 1
+          }
+          vulns=$(jq '.vulnerabilities.count // 0' audit.json)
+          # `warnings` is an object keyed by kind (unmaintained, unsound,
+          # yanked); flatten every bucket to get one count.
+          warns=$(jq '[(.warnings // {})[][]] | length' audit.json)
+          {
+            echo "vulnerabilities=$vulns"
+            echo "warnings=$warns"
+            echo "total=$((vulns + warns))"
+          } >> "$GITHUB_OUTPUT"
+          echo "$vulns vulnerabilities, $warns warnings"
+
   # External links in docs — checked here (not per-PR) so a flaky or
   # rate-limiting third-party site can't fail unrelated PRs.
   external-links:
