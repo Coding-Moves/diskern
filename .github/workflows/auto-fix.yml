@@ -131,6 +131,14 @@ jobs:
           base: ${{ github.event.repository.default_branch }}
           branch: automation/cargo-update
           delete-branch: true
+          # Belt and braces alongside writing the body to RUNNER_TEMP: even
+          # if some later step leaves a stray file in the tree, only the
+          # dependency manifests can reach the commit.
+          add-paths: |
+            Cargo.lock
+            Cargo.toml
+            crates/*/Cargo.toml
+            app/src-tauri/Cargo.toml
           commit-message: "chore(deps): refresh Rust dependencies"
           title: "chore(deps): refresh Rust dependencies"
           body-path: ${{ runner.temp }}/pr-body.md
