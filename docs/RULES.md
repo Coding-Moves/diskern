@@ -42,6 +42,18 @@ evidence (e.g. recently-accessed files), never less.
 - **First match wins** — order in the file is priority order, which is
   why `protected` rules are listed first.
 - Paths that match no rule get `unknown` / `review` — never `safe`.
+- Patterns are plain substrings matched anywhere in the path, so a rule
+  cannot say "this extension, but only under Downloads". Where that
+  matters, write the half that is safe on its own (the extension) and
+  keep the verdict at `review`. Proper glob matching is
+  [issue #41](https://github.com/Coding-Moves/diskern/issues/41).
+
+Because matches can land anywhere in a path, **rule order is a safety
+property**. `installer-packages` matches `.msi` — including the `.msi`
+files inside `C:\Windows\WinSxS` — and only the fact that
+`windows-winsxs` is listed above it keeps those classified `protected`.
+Add new broad rules at the bottom, and add a test if the rule could
+shadow a `protected` one.
 
 ## Contributing rules
 
