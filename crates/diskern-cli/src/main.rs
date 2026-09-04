@@ -23,6 +23,9 @@ enum Command {
         /// Emit full JSON report instead of a summary
         #[arg(long)]
         json: bool,
+        /// Show at most N findings per category; 0 shows every one
+        #[arg(long, value_name = "N", default_value_t = 5)]
+        top: usize,
     },
 }
 
@@ -147,7 +150,7 @@ fn print_findings(findings: &[&Finding], top: usize) {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Scan { roots, json } => {
+        Command::Scan { roots, json, top } => {
             let opts = scanner::ScanOptions {
                 roots,
                 ..Default::default()
@@ -167,7 +170,7 @@ fn main() -> Result<()> {
                     report.duplicate_sets.len()
                 );
                 let findings: Vec<&Finding> = report.findings.iter().collect();
-                print_findings(&findings, 5);
+                print_findings(&findings, top);
 
                 if !report.duplicate_sets.is_empty() {
                     let wasted: u64 = report.duplicate_sets.iter().map(|d| d.wasted).sum();
@@ -177,7 +180,12 @@ fn main() -> Result<()> {
                         report.duplicate_sets.len(),
                         human_bytes(wasted)
                     );
-                    for set in report.duplicate_sets.iter().take(5) {
+                    let dup_shown = if top == 0 {
+                        report.duplicate_sets.len()
+                    } else {
+                        top.min(report.duplicate_sets.len())
+                    };
+                    for set in report.duplicate_sets.iter().take(dup_shown) {
                         println!(
                             "    {:>9}  x{} copies  {}",
                             human_bytes(set.wasted),
@@ -185,8 +193,12 @@ fn main() -> Result<()> {
                             set.paths[0].display()
                         );
                     }
-                    if report.duplicate_sets.len() > 5 {
-                        println!("    {:>9}  … {} more", "", report.duplicate_sets.len() - 5);
+                    if dup_shown < report.duplicate_sets.len() {
+                        println!(
+                            "    {:>9}  … {} more",
+                            "",
+                            report.duplicate_sets.len() - dup_shown
+                        );
                     }
                 }
             }
