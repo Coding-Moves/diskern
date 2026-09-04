@@ -8,7 +8,7 @@ auto-fix workflow turns that finding into a PR.
 | Piece | File | Cadence | Output |
 | --- | --- | --- | --- |
 | Audit | [audit.yml](../.github/workflows/audit.yml) | Mondays 06:00 UTC, every push to `main`/`master`, PRs touching `Cargo.lock` | A labelled tracking issue, or an inline PR annotation |
-| Auto-fix | [auto-fix.yml](../.github/workflows/auto-fix.yml) | Mondays 07:00 UTC, and after any failed Audit run | A PR on `automation/cargo-update` |
+| Auto-fix | [auto-fix.yml](../.github/workflows/auto-fix.yml) | Mondays 07:00 UTC, and after a failed Audit run on `main`/`master` | A PR on `automation/cargo-update` |
 | Dependabot | [dependabot.yml](../.github/dependabot.yml) | Weekly | One grouped PR for minor/patch, one PR per major |
 
 ## Audit
@@ -52,7 +52,9 @@ stands *after* the update, so you can see at a glance whether the bump
 actually cleared the advisory or only part of it.
 
 It always reuses the branch `automation/cargo-update`, so a second run
-updates the open PR rather than stacking a new one.
+updates the open PR rather than stacking a new one, and it always works
+from the default branch — a pull request whose lockfile trips the audit
+is the PR author's to fix, so audit failures from PRs are ignored here.
 
 ## Repository settings you have to enable
 
