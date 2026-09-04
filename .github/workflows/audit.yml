@@ -48,6 +48,15 @@ jobs:
         with:
           tool: cargo-audit
 
+      # gh refuses to attach a label the repo doesn't have, and a fresh
+      # clone of this repo has neither. --force makes this idempotent.
+      - name: Ensure the issue labels exist
+        run: |
+          gh label create security --force \
+            --color B60205 --description "Security advisory or hardening"
+          gh label create automated-issue --force \
+            --color C5DEF5 --description "Filed by a workflow, not a human"
+
       - name: Run cargo audit
         id: audit
         run: |
