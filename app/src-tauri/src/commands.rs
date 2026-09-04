@@ -85,8 +85,15 @@ pub async fn start_scan(
             roots,
             ..Default::default()
         };
-        match scanner::scan(&opts, progress_for_scan) {
-            Ok(entries) => Ok(Some(report::build(entries, &RulesDb::embedded()))),
+        match scanner::scan(&opts, progress_for_scan.clone()) {
+            // build_cancellable also returns None when cancelled — the walk
+            // is only the first half, and dedup hashing is where a cancel
+            // most needs to land.
+            Ok(entries) => Ok(report::build_cancellable(
+                entries,
+                &RulesDb::embedded(),
+                &progress_for_scan.cancelled,
+            )),
             // The user asked for this. `None` means "cancelled", which the
             // frontend renders as an outcome rather than a red error box.
             Err(GenomeError::Cancelled) => Ok(None),
