@@ -102,3 +102,19 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+/* Quiet by default: stopping a read-only scan costs nothing, so this
+   shouldn't compete with the primary action for attention. */
+.cancel-btn {
+  margin-top: 0.6rem;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-radius: 6px;
+  opacity: 0.8;
+}
+.cancel-btn:hover:not(:disabled) { opacity: 1; }
+.cancel-btn:disabled { cursor: default; opacity: 0.5; }
+
+/* A cancelled scan is an outcome, not a failure — deliberately not .error. */
+.notice { opacity: 0.75; font-size: 0.9rem; }
