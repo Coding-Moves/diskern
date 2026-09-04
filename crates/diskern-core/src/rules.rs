@@ -68,4 +68,50 @@ mod tests {
         let (_, verdict, _) = db.classify(std::path::Path::new("/home/user/mystery.bin"));
         assert_eq!(verdict, Verdict::Review);
     }
+
+    #[test]
+    fn logs_are_reachable() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/var/log/syslog.1",
+            "/Users/x/Library/Logs/SomeApp/app.log",
+            "C:\\Users\\x\\AppData\\Local\\CrashDumps\\a.dmp",
+        ] {
+            let (cat, verdict, _) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::Log, "{path}");
+            assert_eq!(verdict, Verdict::Review, "{path}");
+        }
+    }
+
+    #[test]
+    fn installers_are_reachable() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/home/u/Downloads/Diskern_0.1.0_amd64.dmg",
+            "/home/u/Downloads/node-v22.msi",
+            "/home/u/Downloads/tool.pkg",
+            "C:\\Users\\x\\Downloads\\vscode-setup.exe",
+        ] {
+            let (cat, verdict, _) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::Installer, "{path}");
+            assert_eq!(verdict, Verdict::Review, "{path}");
+        }
+    }
+
+    /// The installer patterns are bare extensions, so they match anywhere in
+    /// a path. First-match-wins is the only thing keeping them from
+    /// classifying an OS component as a reclaimable download — which makes
+    /// rule order a safety property, not a stylistic one.
+    #[test]
+    fn protected_rules_still_win_over_installer_patterns() {
+        let db = RulesDb::embedded();
+        for path in [
+            "C:/Windows/System32/DriverStore/setup.exe",
+            "C:/Windows/WinSxS/component.msi",
+        ] {
+            let (cat, verdict, _) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::SystemCritical, "{path}");
+            assert_eq!(verdict, Verdict::Protected, "{path}");
+        }
+    }
 }
