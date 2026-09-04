@@ -3,127 +3,91 @@
   "rules": [
     {
       "id": "windows-driverstore",
-      "patterns": [
-        "/windows/system32/driverstore"
-      ],
+      "patterns": ["/windows/system32/driverstore"],
       "category": "system_critical",
       "verdict": "protected",
       "description": "Windows driver store. Removing files here can make hardware unusable."
     },
     {
       "id": "windows-winsxs",
-      "patterns": [
-        "/windows/winsxs"
-      ],
+      "patterns": ["/windows/winsxs"],
       "category": "system_critical",
       "verdict": "protected",
       "description": "Windows component store. Managed by the OS; never modify directly."
     },
     {
       "id": "chrome-cache",
-      "patterns": [
-        "/google/chrome/user data/default/cache",
-        "/.cache/google-chrome"
-      ],
+      "patterns": ["/google/chrome/user data/default/cache", "/.cache/google-chrome"],
       "category": "browser_cache",
       "verdict": "safe",
       "description": "Chrome browser cache. Fully regenerated on next use; no effect on installed applications or saved data."
     },
     {
       "id": "firefox-cache",
-      "patterns": [
-        "/.cache/mozilla/firefox",
-        "/mozilla/firefox/profiles"
-      ],
+      "patterns": ["/.cache/mozilla/firefox", "/mozilla/firefox/profiles"],
       "category": "browser_cache",
       "verdict": "safe",
       "description": "Firefox cache. Regenerated automatically."
     },
     {
       "id": "rust-target",
-      "patterns": [
-        "/target/debug",
-        "/target/release"
-      ],
+      "patterns": ["/target/debug", "/target/release"],
       "category": "build_artifact",
       "verdict": "review",
       "description": "Rust build artifacts. Regenerable via cargo build, but rebuilding large projects takes time."
     },
     {
       "id": "node-modules",
-      "patterns": [
-        "/node_modules/"
-      ],
+      "patterns": ["/node_modules/"],
       "category": "build_artifact",
       "verdict": "review",
       "description": "Node.js dependencies. Regenerable via npm/pnpm install if a lockfile exists."
     },
     {
       "id": "pip-cache",
-      "patterns": [
-        "/.cache/pip",
-        "/appdata/local/pip/cache"
-      ],
+      "patterns": ["/.cache/pip", "/appdata/local/pip/cache"],
       "category": "package_manager_cache",
       "verdict": "safe",
       "description": "pip download cache. Packages are re-downloaded on demand."
     },
     {
       "id": "unix-system-logs",
-      "patterns": [
-        "/var/log/"
-      ],
+      "patterns": ["/var/log/"],
       "category": "log",
       "verdict": "review",
       "description": "System logs. Reclaimable once you no longer need them, but they are the first thing anyone asks for when something breaks."
     },
     {
       "id": "macos-user-logs",
-      "patterns": [
-        "/library/logs/"
-      ],
+      "patterns": ["/library/logs/"],
       "category": "log",
       "verdict": "review",
       "description": "Application logs written by macOS apps. Regenerated as the apps run; only worth keeping while you are chasing a bug."
     },
     {
       "id": "windows-crash-logs",
-      "patterns": [
-        "/appdata/local/crashdumps/",
-        "/appdata/local/microsoft/windows/wer/"
-      ],
+      "patterns": ["/appdata/local/crashdumps/", "/appdata/local/microsoft/windows/wer/"],
       "category": "log",
       "verdict": "review",
       "description": "Windows crash dumps and error reports. Large, and only useful while investigating the crash that produced them."
     },
     {
       "id": "installer-packages",
-      "patterns": [
-        ".dmg",
-        ".msi",
-        ".pkg"
-      ],
+      "patterns": [".dmg", ".msi", ".pkg"],
       "category": "installer",
       "verdict": "review",
       "description": "Installer package. Reclaimable, but you will have to download it again to reinstall or roll back."
     },
     {
       "id": "setup-executables",
-      "patterns": [
-        "setup.exe",
-        "-installer.exe",
-        "_installer.exe"
-      ],
+      "patterns": ["setup.exe", "-installer.exe", "_installer.exe"],
       "category": "installer",
       "verdict": "review",
       "description": "Windows setup executable. Same trade-off as any installer: easy to reclaim, only re-obtainable while the download is still available."
     },
     {
       "id": "temp-dirs",
-      "patterns": [
-        "/tmp/",
-        "/appdata/local/temp"
-      ],
+      "patterns": ["/tmp/", "/appdata/local/temp"],
       "category": "temp_file",
       "verdict": "review",
       "description": "Temporary files. Usually safe once no program is using them."
