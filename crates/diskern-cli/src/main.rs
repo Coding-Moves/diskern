@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use diskern_core::{report, rules::RulesDb, scanner};
+use diskern_core::{report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -43,6 +43,107 @@ fn human_bytes(n: u64) -> String {
     }
 }
 
+/// Display strings live in the CLI, not in diskern-core — the engine is
+/// deliberately UI-agnostic. These mirror the labels the desktop app uses
+/// so the two front ends describe the same finding the same way.
+fn verdict_label(v: Verdict) -> &'static str {
+    match v {
+        Verdict::Safe => "Safe to remove",
+        Verdict::Review => "Review first",
+        Verdict::Risky => "Risky — not recommended",
+        Verdict::Protected => "Protected — do not touch",
+    }
+}
+
+fn category_label(c: Category) -> &'static str {
+    match c {
+        Category::BrowserCache => "Browser cache",
+        Category::BuildArtifact => "Build artifacts",
+        Category::PackageManagerCache => "Package manager cache",
+        Category::TempFile => "Temporary files",
+        Category::Log => "Logs",
+        Category::Installer => "Installers",
+        Category::DuplicateFile => "Duplicate file",
+        Category::EmptyDirectory => "Empty folders",
+        Category::SystemCritical => "System critical",
+        Category::Unknown => "Unrecognized",
+    }
+}
+
+/// Group by category, biggest reclaimable total first. Findings arrive
+/// already sorted by size, so each group keeps that order.
+fn by_category<'a>(findings: &[&'a Finding]) -> Vec<(Category, Vec<&'a Finding>)> {
+    let mut groups: Vec<(Category, Vec<&'a Finding>)> = Vec::new();
+    for &f in findings {
+        match groups.iter_mut().find(|(c, _)| *c == f.category) {
+            Some((_, items)) => items.push(f),
+            None => groups.push((f.category, vec![f])),
+        }
+    }
+    groups.sort_by_key(|(_, items)| {
+        std::cmp::Reverse(items.iter().map(|f| f.reclaimable).sum::<u64>())
+    });
+    groups
+}
+
+/// Verdict, then category, then the findings themselves with the rule that
+/// matched. Verdicts are printed in ascending order — safest first — which
+/// is also what `Verdict`'s Ord derives.
+fn print_findings(findings: &[&Finding], top: usize) {
+    for verdict in [
+        Verdict::Safe,
+        Verdict::Review,
+        Verdict::Risky,
+        Verdict::Protected,
+    ] {
+        let group: Vec<&Finding> = findings
+            .iter()
+            .copied()
+            .filter(|f| f.verdict == verdict)
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+
+        let total: u64 = group.iter().map(|f| f.reclaimable).sum();
+        println!();
+        println!(
+            "{} — {} finding{} · {}",
+            verdict_label(verdict),
+            group.len(),
+            if group.len() == 1 { "" } else { "s" },
+            human_bytes(total)
+        );
+
+        for (category, items) in by_category(&group) {
+            let subtotal: u64 = items.iter().map(|f| f.reclaimable).sum();
+            println!(
+                "  {} · {} · {}",
+                category_label(category),
+                items.len(),
+                human_bytes(subtotal)
+            );
+
+            let shown = if top == 0 { items.len() } else { top.min(items.len()) };
+            for f in &items[..shown] {
+                println!(
+                    "    {:>9}  {}",
+                    human_bytes(f.reclaimable),
+                    f.entry.path.display()
+                );
+                // The first reason is the matched rule; the rest come from
+                // the risk module and repeat across a whole category.
+                if let Some(reason) = f.reasons.first() {
+                    println!("    {:>9}  {reason}", "");
+                }
+            }
+            if shown < items.len() {
+                println!("    {:>9}  … {} more", "", items.len() - shown);
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -65,13 +166,28 @@ fn main() -> Result<()> {
                     report.findings.len(),
                     report.duplicate_sets.len()
                 );
-                for set in report.duplicate_sets.iter().take(10) {
+                let findings: Vec<&Finding> = report.findings.iter().collect();
+                print_findings(&findings, 5);
+
+                if !report.duplicate_sets.is_empty() {
+                    let wasted: u64 = report.duplicate_sets.iter().map(|d| d.wasted).sum();
+                    println!();
                     println!(
-                        "  dup x{}  {} wasted  {}",
-                        set.paths.len(),
-                        human_bytes(set.wasted),
-                        set.paths[0].display()
+                        "Duplicate files — {} sets · {} wasted",
+                        report.duplicate_sets.len(),
+                        human_bytes(wasted)
                     );
+                    for set in report.duplicate_sets.iter().take(5) {
+                        println!(
+                            "    {:>9}  x{} copies  {}",
+                            human_bytes(set.wasted),
+                            set.paths.len(),
+                            set.paths[0].display()
+                        );
+                    }
+                    if report.duplicate_sets.len() > 5 {
+                        println!("    {:>9}  … {} more", "", report.duplicate_sets.len() - 5);
+                    }
                 }
             }
         }
