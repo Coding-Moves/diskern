@@ -102,8 +102,10 @@ fn category_label(c: Category) -> &'static str {
 fn by_category<'a>(findings: &[&'a Finding]) -> Vec<(Category, Vec<&'a Finding>)> {
     let mut groups: Vec<(Category, Vec<&'a Finding>)> = Vec::new();
     for &f in findings {
-        match groups.iter_mut().find(|(c, _)| *c == f.category) {
-            Some((_, items)) => items.push(f),
+        // position(), not iter_mut().find() — the latter keeps `groups`
+        // mutably borrowed through the None arm, which then can't push.
+        match groups.iter().position(|(c, _)| *c == f.category) {
+            Some(i) => groups[i].1.push(f),
             None => groups.push((f.category, vec![f])),
         }
     }
