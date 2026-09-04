@@ -1,6 +1,8 @@
 # Slow-moving checks that shouldn't block every PR: dependency
 # vulnerability audit and external-link rot. Run weekly, on manual
-# dispatch, and whenever the Rust lockfile changes.
+# dispatch, on every push to a release branch, and on PRs that move the
+# Rust lockfile. New RUSTSEC advisories land against code that never
+# changed, so the schedule matters as much as the lockfile trigger.
 name: Audit
 
 on:
@@ -8,8 +10,7 @@ on:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: [Cargo.lock]
+    branches: [main, master]
   pull_request:
     paths: [Cargo.lock]
 
