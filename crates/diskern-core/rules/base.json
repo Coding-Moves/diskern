@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "rules": [
     {
       "id": "windows-driverstore",
@@ -14,6 +14,13 @@
       "category": "system_critical",
       "verdict": "protected",
       "description": "Windows component store. Managed by the OS; never modify directly."
+    },
+    {
+      "id": "windows-installer-cache",
+      "patterns": ["/windows/installer/", "/package cache/"],
+      "category": "system_critical",
+      "verdict": "protected",
+      "description": "Windows Installer cache. Windows needs these to uninstall, repair, or patch installed software; removing them strands every product that registered here."
     },
     {
       "id": "chrome-cache",
@@ -49,6 +56,34 @@
       "category": "package_manager_cache",
       "verdict": "safe",
       "description": "pip download cache. Packages are re-downloaded on demand."
+    },
+    {
+      "id": "unix-system-logs",
+      "patterns": ["/var/log/"],
+      "category": "log",
+      "verdict": "review",
+      "description": "System logs. Reclaimable once you no longer need them, but they are the first thing anyone asks for when something breaks."
+    },
+    {
+      "id": "macos-user-logs",
+      "patterns": ["/library/logs/"],
+      "category": "log",
+      "verdict": "review",
+      "description": "Application logs written by macOS apps. Regenerated as the apps run; only worth keeping while you are chasing a bug."
+    },
+    {
+      "id": "windows-crash-logs",
+      "patterns": ["/appdata/local/crashdumps/", "/appdata/local/microsoft/windows/wer/"],
+      "category": "log",
+      "verdict": "review",
+      "description": "Windows crash dumps and error reports. Large, and only useful while investigating the crash that produced them."
+    },
+    {
+      "id": "installer-packages",
+      "patterns": [".dmg", ".msi", ".pkg"],
+      "category": "installer",
+      "verdict": "review",
+      "description": "Installer package. Reclaimable, but you will have to download it again to reinstall or roll back."
     },
     {
       "id": "temp-dirs",

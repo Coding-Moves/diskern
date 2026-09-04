@@ -12,6 +12,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which parts of the tree a change touches. Only consumer right now is
+  # the Tauri compile below, which is far too slow to run on a doc-only PR.
+  changes:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'crates/**'
+              - 'app/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+
   test:
     runs-on: ubuntu-22.04
     steps:
@@ -25,6 +47,47 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -p diskern-core -p diskern-cli -- -D warnings
       - run: cargo test -p diskern-core -p diskern-cli
+
+  # Type-checks app/src-tauri against the current diskern-core. Until this
+  # existed nothing compiled the Tauri crate between releases: a breaking
+  # change to a core signature merged green, then failed the release build
+  # after the v* tag was already pushed.
+  #
+  # clippy, not a full `cargo build` — the goal is catching signature drift
+  # and lint regressions in the shell; the release workflow still owns
+  # producing an actual bundle.
+  app-tauri:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same apt line as release.yml. Kept in sync by hand; there is no
+      # cheaper way to share it between workflows.
+      - name: Linux system deps (Tauri v2 / webkitgtk 4.1)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      # tauri.conf.json points frontendDist at ../dist, which is gitignored.
+      # Build it first so tauri-build has something to resolve.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - run: npm run build
+        working-directory: app
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+      - run: cargo clippy -p diskern-app --all-targets -- -D warnings
 
   # Spell-check code, docs, and comments. Config in _typos.toml.
   # Failures annotate the exact line in the PR diff.

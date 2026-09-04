@@ -42,6 +42,31 @@ evidence (e.g. recently-accessed files), never less.
 - **First match wins** — order in the file is priority order, which is
   why `protected` rules are listed first.
 - Paths that match no rule get `unknown` / `review` — never `safe`.
+- Patterns are plain substrings matched anywhere in the path, so a rule
+  cannot say "this extension, but only under Downloads". Where that
+  matters, write the half that is safe on its own (the extension) and
+  keep the verdict at `review`. Proper glob matching is
+  [issue #41](https://github.com/Coding-Moves/diskern/issues/41).
+
+Because matches can land anywhere in a path, **rule order is a safety
+property**. `installer-packages` matches `.msi` anywhere — including
+`C:\Windows\Installer`, the cache Windows needs to uninstall, repair or
+patch installed software, and the `Package Cache` folders that serve the
+same purpose for .NET and Visual Studio. `review` is an *actionable*
+verdict in the app, so without `windows-installer-cache` listed above
+`installer-packages`, the UI would offer to quarantine them.
+
+When adding a broad rule:
+
+1. Put it at the bottom, below the `protected` entries.
+2. Work out what else its pattern reaches. An extension matches in system
+   directories too, not just in `Downloads`.
+3. If it can shadow a `protected` rule, add a test. `rules.rs` has one
+   pinning exactly these cases.
+
+Prefer leaving something `unknown` over classifying it wrongly:
+`report::build` drops unknown entries, so they never reach the user as an
+actionable row.
 
 ## Contributing rules
 

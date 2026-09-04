@@ -5,6 +5,7 @@ mod commands;
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(commands::ActiveScan::default())
         .setup(|app| {
             // Updater: desktop only, checked from the frontend after launch.
             #[cfg(desktop)]
@@ -16,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_scan,
+            commands::cancel_scan,
             commands::quarantine_finding,
         ])
         .run(tauri::generate_context!())

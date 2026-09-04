@@ -208,7 +208,7 @@ function DuplicatesSection({ sets }) {
  * of files found so far (proof of life) plus an animated indeterminate
  * bar (motion reads as "working," not "frozen").
  */
-function ScanningIndicator({ filesSeen, bytesSeen }) {
+function ScanningIndicator({ filesSeen, bytesSeen, onCancel, cancelling }) {
   return (
     <div className="scan-progress">
       <div className="progress-track">
@@ -218,6 +218,11 @@ function ScanningIndicator({ filesSeen, bytesSeen }) {
         {filesSeen.toLocaleString()} files found
         {bytesSeen > 0 && <> · {(bytesSeen / 1e9).toFixed(2)} GB so far</>}
       </p>
+      {/* The walk checks the cancel flag per entry, so stopping is quick but
+          not instant — say "Stopping…" rather than pretending it's done. */}
+      <button className="cancel-btn" onClick={onCancel} disabled={cancelling}>
+        {cancelling ? "Stopping…" : "Cancel scan"}
+      </button>
     </div>
   );
 }
@@ -226,7 +231,11 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [scannedFolder, setScannedFolder] = useState(null);
   const [scanning, setScanning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
+  // Set when a scan ends because the user stopped it. Not an error — it
+  // renders as a plain note, and any previous report stays on screen.
+  const [notice, setNotice] = useState(null);
   const [liveProgress, setLiveProgress] = useState({ files_seen: 0, bytes_seen: 0 });
   // Paths already quarantined this session, and the bytes they accounted for.
   // Rows in this set are filtered out of the view; reclaimed is subtracted
@@ -272,8 +281,21 @@ export default function App() {
     setReclaimed((prev) => prev + finding.reclaimable);
   }
 
+  // Cancelling races the scan finishing on its own; the command returns
+  // false in that case and there's nothing to report either way.
+  async function cancelScan() {
+    setCancelling(true);
+    try {
+      await invoke("cancel_scan");
+    } catch (e) {
+      setError(String(e));
+      setCancelling(false);
+    }
+  }
+
   async function runScan() {
     setError(null);
+    setNotice(null);
 
     let folder;
     try {
@@ -286,6 +308,7 @@ export default function App() {
 
     setLiveProgress({ files_seen: 0, bytes_seen: 0 });
     setScanning(true);
+    setCancelling(false);
     appState.busy = true;
 
     // Subscribe to live progress events emitted by the Rust command
@@ -296,15 +319,22 @@ export default function App() {
 
     try {
       const result = await invoke("start_scan", { roots: [folder] });
-      setReport(result);
-      setScannedFolder(folder);
-      // Fresh scan — clear any prior session's quarantine bookkeeping.
-      setQuarantinedPaths(new Set());
-      setReclaimed(0);
+      // null means the scan was cancelled. Keep whatever report was already
+      // on screen rather than blanking the view.
+      if (result === null) {
+        setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
+      } else {
+        setReport(result);
+        setScannedFolder(folder);
+        // Fresh scan — clear any prior session's quarantine bookkeeping.
+        setQuarantinedPaths(new Set());
+        setReclaimed(0);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
       setScanning(false);
+      setCancelling(false);
       appState.busy = false;
       if (unlistenRef.current) {
         unlistenRef.current();
@@ -330,9 +360,12 @@ export default function App() {
             <ScanningIndicator
               filesSeen={liveProgress.files_seen}
               bytesSeen={liveProgress.bytes_seen}
+              onCancel={cancelScan}
+              cancelling={cancelling}
             />
           )}
           {error && <p className="error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
         </section>
       )}
 
@@ -352,9 +385,12 @@ export default function App() {
             <ScanningIndicator
               filesSeen={liveProgress.files_seen}
               bytesSeen={liveProgress.bytes_seen}
+              onCancel={cancelScan}
+              cancelling={cancelling}
             />
           )}
           {error && <p className="error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
 
           <DuplicatesSection sets={report.duplicate_sets} />
           <CategorySection
