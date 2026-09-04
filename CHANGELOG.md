@@ -8,11 +8,10 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Changed
 
-- Relicensed from MIT OR Apache-2.0 to MIT only
+- Licensed under MIT
 
 ### Added
 
-- Dual MIT OR Apache-2.0 licensing with in-repo license texts
 - Automated RUSTSEC auditing: a weekly `cargo audit` that files and closes
   a labelled tracking issue, and an auto-fix workflow that opens a
   dependency-update PR when an advisory lands
