@@ -104,8 +104,16 @@ pub async fn start_scan(
 
     stop.store(true, Ordering::Relaxed);
     let _ = ticker.join();
-    // Whatever happened, this scan is no longer in flight.
-    *state.slot() = None;
+    // Clear only if the slot still holds *this* scan. An unconditional
+    // `= None` would let a short scan that started second erase a longer
+    // one's handle when it finished first, leaving the survivor with a
+    // Cancel button wired to nothing.
+    {
+        let mut slot = state.slot();
+        if slot.as_ref().is_some_and(|current| Arc::ptr_eq(current, &progress)) {
+            *slot = None;
+        }
+    }
 
     // One final snapshot so the UI's last-seen count matches the real total.
     let _ = window.emit(
