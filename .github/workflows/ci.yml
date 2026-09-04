@@ -53,8 +53,9 @@ jobs:
   # change to a core signature merged green, then failed the release build
   # after the v* tag was already pushed.
   #
-  # `cargo check`, not `build` — the goal is catching signature drift, and
-  # the release workflow still owns producing an actual bundle.
+  # clippy, not a full `cargo build` — the goal is catching signature drift
+  # and lint regressions in the shell; the release workflow still owns
+  # producing an actual bundle.
   app-tauri:
     needs: changes
     if: needs.changes.outputs.app == 'true'
