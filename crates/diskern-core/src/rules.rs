@@ -129,9 +129,8 @@ mod tests {
     #[test]
     fn installed_application_binaries_are_not_installers() {
         let db = RulesDb::embedded();
-        let (cat, _, rule) = db.classify(std::path::Path::new(
-            "C:/Program Files/SomeApp/setup.exe",
-        ));
+        let (cat, _, rule) =
+            db.classify(std::path::Path::new("C:/Program Files/SomeApp/setup.exe"));
         assert_eq!(cat, Category::Unknown);
         assert!(rule.is_none());
     }

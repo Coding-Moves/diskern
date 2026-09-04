@@ -110,7 +110,10 @@ pub async fn start_scan(
     // Cancel button wired to nothing.
     {
         let mut slot = state.slot();
-        if slot.as_ref().is_some_and(|current| Arc::ptr_eq(current, &progress)) {
+        if slot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &progress))
+        {
             *slot = None;
         }
     }
