@@ -62,3 +62,13 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             git diff --stat
           fi
+
+      # Never open a PR that CI would immediately turn red. Same three gates
+      # as ci.yml, and the same reason for skipping the Tauri crate: building
+      # it needs webkitgtk, which the release workflow already covers.
+      - name: Verify the workspace still passes
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          cargo fmt --check
+          cargo clippy -p diskern-core -p diskern-cli -- -D warnings
+          cargo test -p diskern-core -p diskern-cli
