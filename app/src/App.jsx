@@ -227,6 +227,9 @@ export default function App() {
   const [scannedFolder, setScannedFolder] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState(null);
+  // Set when a scan ends because the user stopped it. Not an error — it
+  // renders as a plain note, and any previous report stays on screen.
+  const [notice, setNotice] = useState(null);
   const [liveProgress, setLiveProgress] = useState({ files_seen: 0, bytes_seen: 0 });
   // Paths already quarantined this session, and the bytes they accounted for.
   // Rows in this set are filtered out of the view; reclaimed is subtracted
@@ -274,6 +277,7 @@ export default function App() {
 
   async function runScan() {
     setError(null);
+    setNotice(null);
 
     let folder;
     try {
@@ -296,11 +300,17 @@ export default function App() {
 
     try {
       const result = await invoke("start_scan", { roots: [folder] });
-      setReport(result);
-      setScannedFolder(folder);
-      // Fresh scan — clear any prior session's quarantine bookkeeping.
-      setQuarantinedPaths(new Set());
-      setReclaimed(0);
+      // null means the scan was cancelled. Keep whatever report was already
+      // on screen rather than blanking the view.
+      if (result === null) {
+        setNotice("Scan cancelled. Nothing was scanned, moved, or deleted.");
+      } else {
+        setReport(result);
+        setScannedFolder(folder);
+        // Fresh scan — clear any prior session's quarantine bookkeeping.
+        setQuarantinedPaths(new Set());
+        setReclaimed(0);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -333,6 +343,7 @@ export default function App() {
             />
           )}
           {error && <p className="error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
         </section>
       )}
 
@@ -355,6 +366,7 @@ export default function App() {
             />
           )}
           {error && <p className="error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
 
           <DuplicatesSection sets={report.duplicate_sets} />
           <CategorySection

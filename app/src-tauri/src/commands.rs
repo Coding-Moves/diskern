@@ -1,4 +1,4 @@
-use diskern_core::{actions, report, rules::RulesDb, scanner, Verdict};
+use diskern_core::{actions, report, rules::RulesDb, scanner, GenomeError, Verdict};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -37,12 +37,16 @@ struct ScanProgressPayload {
 /// UI can show a live "N files found" counter instead of a frozen button.
 /// This is a live count, not a percentage — the total file count isn't
 /// known until the walk finishes, so a true percentage would be fake.
+///
+/// Returns `None` when the scan was cancelled. Cancelling is a thing the
+/// user did on purpose, so it travels as a successful outcome with no
+/// report, not as an `Err` the UI would have to pattern-match on a string.
 #[tauri::command]
 pub async fn start_scan(
     window: Window,
     state: State<'_, ActiveScan>,
     roots: Vec<PathBuf>,
-) -> Result<report::Report, String> {
+) -> Result<Option<report::Report>, String> {
     let progress = Arc::new(scanner::ScanProgress::default());
     // Publish the handle before the walk starts. The guard is a temporary
     // here on purpose — holding it across the await below would make this
@@ -79,8 +83,13 @@ pub async fn start_scan(
             roots,
             ..Default::default()
         };
-        let entries = scanner::scan(&opts, progress_for_scan).map_err(|e| e.to_string())?;
-        Ok::<_, String>(report::build(entries, &RulesDb::embedded()))
+        match scanner::scan(&opts, progress_for_scan) {
+            Ok(entries) => Ok(Some(report::build(entries, &RulesDb::embedded()))),
+            // The user asked for this. `None` means "cancelled", which the
+            // frontend renders as an outcome rather than a red error box.
+            Err(GenomeError::Cancelled) => Ok(None),
+            Err(e) => Err::<_, String>(e.to_string()),
+        }
     })
     .await;
 
