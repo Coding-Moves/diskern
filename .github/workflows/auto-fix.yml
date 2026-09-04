@@ -72,3 +72,25 @@ jobs:
           cargo fmt --check
           cargo clippy -p diskern-core -p diskern-cli -- -D warnings
           cargo test -p diskern-core -p diskern-cli
+
+      # Single-quoted printf throughout — the body is full of markdown
+      # backticks, which bash would read as command substitution.
+      - name: Summarize the update for the PR body
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          {
+            printf 'Automated dependency refresh.\n\n'
+            printf '## What ran\n\n'
+            printf -- '- `cargo audit fix` — raises version requirements that an advisory needs (experimental).\n'
+            printf -- '- `cargo update` — refreshes `Cargo.lock` within the existing semver ranges.\n'
+            printf -- '- `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` — all green before this PR opened.\n\n'
+            printf '## Changes\n\n```diff\n'
+            git diff -- Cargo.lock Cargo.toml 'crates/*/Cargo.toml' 'app/src-tauri/Cargo.toml' | head -c 20000
+            printf '\n```\n\n'
+            printf '## Advisories after the update\n\n```\n'
+            cargo audit --color never 2>&1 | head -c 10000 || true
+            printf '\n```\n\n'
+            printf '<sub>Opened by the Dependency auto-fix workflow. Both blocks are truncated at\n'
+            printf 'the size GitHub will render; run the commands locally for the full output.</sub>\n'
+          } > pr-body.md
+          wc -c pr-body.md
