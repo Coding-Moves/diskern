@@ -49,11 +49,24 @@ evidence (e.g. recently-accessed files), never less.
   [issue #41](https://github.com/Coding-Moves/diskern/issues/41).
 
 Because matches can land anywhere in a path, **rule order is a safety
-property**. `installer-packages` matches `.msi` — including the `.msi`
-files inside `C:\Windows\WinSxS` — and only the fact that
-`windows-winsxs` is listed above it keeps those classified `protected`.
-Add new broad rules at the bottom, and add a test if the rule could
-shadow a `protected` one.
+property**. `installer-packages` matches `.msi` anywhere — including
+`C:\Windows\Installer`, the cache Windows needs to uninstall, repair or
+patch installed software, and the `Package Cache` folders that serve the
+same purpose for .NET and Visual Studio. `review` is an *actionable*
+verdict in the app, so without `windows-installer-cache` listed above
+`installer-packages`, the UI would offer to quarantine them.
+
+When adding a broad rule:
+
+1. Put it at the bottom, below the `protected` entries.
+2. Work out what else its pattern reaches. An extension matches in system
+   directories too, not just in `Downloads`.
+3. If it can shadow a `protected` rule, add a test. `rules.rs` has one
+   pinning exactly these cases.
+
+Prefer leaving something `unknown` over classifying it wrongly:
+`report::build` drops unknown entries, so they never reach the user as an
+actionable row.
 
 ## Contributing rules
 

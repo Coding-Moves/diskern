@@ -16,6 +16,13 @@
       "description": "Windows component store. Managed by the OS; never modify directly."
     },
     {
+      "id": "windows-installer-cache",
+      "patterns": ["/windows/installer/", "/package cache/"],
+      "category": "system_critical",
+      "verdict": "protected",
+      "description": "Windows Installer cache. Windows needs these to uninstall, repair, or patch installed software; removing them strands every product that registered here."
+    },
+    {
       "id": "chrome-cache",
       "patterns": ["/google/chrome/user data/default/cache", "/.cache/google-chrome"],
       "category": "browser_cache",
@@ -77,13 +84,6 @@
       "category": "installer",
       "verdict": "review",
       "description": "Installer package. Reclaimable, but you will have to download it again to reinstall or roll back."
-    },
-    {
-      "id": "setup-executables",
-      "patterns": ["setup.exe", "-installer.exe", "_installer.exe"],
-      "category": "installer",
-      "verdict": "review",
-      "description": "Windows setup executable. Same trade-off as any installer: easy to reclaim, only re-obtainable while the download is still available."
     },
     {
       "id": "temp-dirs",
