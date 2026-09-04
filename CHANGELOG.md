@@ -11,7 +11,8 @@ All notable changes to Diskern are documented here. The format follows
 - Cancel a running scan from the desktop app
 - `diskern scan` prints the findings themselves — grouped by verdict and
   category, with `--top` to cap each group and `--verdict` to filter
-- Rules for logs and installers, so both categories are reachable
+- Rules for logs and installers, so both categories are reachable, with the
+  Windows Installer cache explicitly protected from them
 - CI type-checks the Tauri crate whenever the app or the engine changes,
   instead of leaving app breakage to surface at release time
 - Automated RUSTSEC auditing: a weekly `cargo audit` that files and closes
