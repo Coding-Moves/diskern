@@ -322,7 +322,7 @@ export default function App() {
       // null means the scan was cancelled. Keep whatever report was already
       // on screen rather than blanking the view.
       if (result === null) {
-        setNotice("Scan cancelled. Nothing was scanned, moved, or deleted.");
+        setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
       } else {
         setReport(result);
         setScannedFolder(folder);
