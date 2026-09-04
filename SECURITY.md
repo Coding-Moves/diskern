@@ -20,6 +20,16 @@ Diskern touches user files, so we treat the following as security issues:
 - Path traversal or symlink tricks that let a rule act outside scanned roots.
 - The updater accepting an improperly signed release.
 
+## Dependency advisories
+
+Advisories in our dependencies are a different case from the above: they
+are already public in the [RUSTSEC database](https://rustsec.org/) by the
+time we see them, so there is nothing to disclose privately. A workflow
+audits `Cargo.lock` weekly and on every push to `main`, files a public
+tracking issue labelled `security` when it finds something, and opens a
+dependency-update PR to clear it. See
+[docs/DEPENDENCY-AUTOMATION.md](docs/DEPENDENCY-AUTOMATION.md).
+
 ## Supported versions
 
 Only the latest release receives security fixes.

@@ -1,9 +1,16 @@
 version: 2
 updates:
+  # Version updates only. Dependabot *security* updates are a repository
+  # setting, not config — see docs/DEPENDENCY-AUTOMATION.md. They ignore
+  # `groups` and arrive one advisory per PR, which is what you want when
+  # the PR needs to be merged on its own schedule.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 10
+    labels: [dependencies, rust]
+    assignees: [Muawiya-contact]
     groups:
       cargo-minor:
         update-types: [minor, patch]

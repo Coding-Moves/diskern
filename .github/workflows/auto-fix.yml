@@ -1,0 +1,138 @@
+# Turns a red audit into a reviewable PR instead of a chore. Runs on a
+# schedule, on demand, and immediately after Audit finishes red.
+#
+# Note: PRs opened with GITHUB_TOKEN do not start other workflows, so the
+# PR this opens arrives without CI. See docs/DEPENDENCY-AUTOMATION.md for
+# the PAT swap that fixes it; the checks below run here in the meantime.
+name: Dependency auto-fix
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC, an hour after Audit
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Audit]
+    types: [completed]
+
+permissions:
+  contents: write # push the update branch
+  pull-requests: write # open and label the PR
+  issues: write # create the labels the PR is filed under
+
+# One update branch, one writer. A scheduled run and an audit-triggered
+# run must never race each other onto it.
+concurrency:
+  group: dependency-auto-fix
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # A green audit has nothing to chase. Neither does a red one from a
+    # pull request: that failure belongs to the PR branch — often a fork —
+    # and updating dependencies there is the PR author's call, not ours.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.event != 'pull_request')
+    runs-on: ubuntu-22.04
+    steps:
+      # Pinned to the default branch: on a workflow_run event the default
+      # checkout follows whatever branch tripped the audit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+
+      # `cargo audit fix` sits behind a non-default feature, so this one has
+      # to be compiled — no prebuilt binary carries it.
+      - name: Install cargo-audit with the fix subcommand
+        run: cargo install cargo-audit --features=fix --locked
+
+      # Best effort. `fix` is experimental and rewrites version requirements
+      # in the manifests; when it can't help, `cargo update` still runs.
+      - name: Apply advisory fixes
+        run: cargo audit fix || echo "cargo audit fix applied nothing"
+
+      # Refreshes Cargo.lock inside the existing semver ranges — this is what
+      # picks up patch releases that quietly clear an advisory.
+      - name: Update the lockfile
+        run: cargo update
+
+      - name: Check whether anything moved
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Dependencies already current — no PR to open."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      # Never open a PR that CI would immediately turn red. Same three gates
+      # as ci.yml, and the same reason for skipping the Tauri crate: building
+      # it needs webkitgtk, which the release workflow already covers.
+      - name: Verify the workspace still passes
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          cargo fmt --check
+          cargo clippy -p diskern-core -p diskern-cli -- -D warnings
+          cargo test -p diskern-core -p diskern-cli
+
+      # Single-quoted printf throughout — the body is full of markdown
+      # backticks, which bash would read as command substitution.
+      - name: Summarize the update for the PR body
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          {
+            printf 'Automated dependency refresh.\n\n'
+            printf '## What ran\n\n'
+            printf -- '- `cargo audit fix` — raises version requirements that an advisory needs (experimental).\n'
+            printf -- '- `cargo update` — refreshes `Cargo.lock` within the existing semver ranges.\n'
+            printf -- '- `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` — all green before this PR opened.\n\n'
+            printf '## Changes\n\n```diff\n'
+            git diff -- Cargo.lock Cargo.toml 'crates/*/Cargo.toml' 'app/src-tauri/Cargo.toml' | head -c 20000
+            printf '\n```\n\n'
+            printf '## Advisories after the update\n\n```\n'
+            cargo audit --color never 2>&1 | head -c 10000 || true
+            printf '\n```\n\n'
+            printf '<sub>Opened by the Dependency auto-fix workflow. Both blocks are truncated at\n'
+            printf 'the size GitHub will render; run the commands locally for the full output.</sub>\n'
+          } > pr-body.md
+          wc -c pr-body.md
+
+      # create-pull-request fails the whole step on an unknown label rather
+      # than opening the PR unlabelled, and `security` only exists once
+      # audit.yml has run at least once. --force keeps this idempotent.
+      - name: Ensure the PR labels exist
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create security --force \
+            --color B60205 --description "Security advisory or hardening"
+          gh label create dependencies --force \
+            --color 0366D6 --description "Pull requests that update a dependency file"
+          gh label create rust --force \
+            --color 000000 --description "Pull requests that update rust code"
+
+      - name: Open the update PR
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: ${{ github.event.repository.default_branch }}
+          branch: automation/cargo-update
+          delete-branch: true
+          commit-message: "chore(deps): refresh Rust dependencies"
+          title: "chore(deps): refresh Rust dependencies"
+          body-path: pr-body.md
+          labels: |
+            dependencies
+            rust
+            security
+          assignees: Muawiya-contact
+          reviewers: Muawiya-contact

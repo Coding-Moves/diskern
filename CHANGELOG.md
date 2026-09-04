@@ -13,6 +13,9 @@ All notable changes to Diskern are documented here. The format follows
 ### Added
 
 - Dual MIT OR Apache-2.0 licensing with in-repo license texts
+- Automated RUSTSEC auditing: a weekly `cargo audit` that files and closes
+  a labelled tracking issue, and an auto-fix workflow that opens a
+  dependency-update PR when an advisory lands
 - Community docs: contributing guide, code of conduct, security policy
 - Per-section READMEs and an architecture overview
 

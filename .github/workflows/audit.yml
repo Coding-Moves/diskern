@@ -1,6 +1,8 @@
 # Slow-moving checks that shouldn't block every PR: dependency
 # vulnerability audit and external-link rot. Run weekly, on manual
-# dispatch, and whenever the Rust lockfile changes.
+# dispatch, on every push to a release branch, and on PRs that move the
+# Rust lockfile. New RUSTSEC advisories land against code that never
+# changed, so the schedule matters as much as the lockfile trigger.
 name: Audit
 
 on:
@@ -8,28 +10,140 @@ on:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: [Cargo.lock]
+    branches: [main, master]
   pull_request:
     paths: [Cargo.lock]
 
 jobs:
-  # RustSec advisory check over Cargo.lock.
+  # PR-time advisory check: annotates the changed lockfile inline so the
+  # author sees the advisory in the diff. PRs only — off-PR runs are handled
+  # by `advisory-issue` below, which files a labelled tracking issue instead.
   cargo-audit:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
     permissions:
       contents: read
-      issues: write # the action files an issue for new advisories on scheduled runs
+      checks: write # the action reports advisories as a check run
     steps:
       - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Off-PR runs own a single tracking issue for the whole lockfile: one
+  # issue, kept current, rather than a fresh one every Monday.
+  advisory-issue:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_TITLE: RUSTSEC advisories in Cargo.lock
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # gh refuses to attach a label the repo doesn't have, and a fresh
+      # clone of this repo has neither. --force makes this idempotent.
+      - name: Ensure the issue labels exist
+        run: |
+          gh label create security --force \
+            --color B60205 --description "Security advisory or hardening"
+          gh label create automated-issue --force \
+            --color C5DEF5 --description "Filed by a workflow, not a human"
+
+      - name: Run cargo audit
+        id: audit
+        run: |
+          # A non-zero exit only means "found something" — the case we most
+          # need to keep running for — so read the report, not the status.
+          cargo audit --json > audit.json || true
+          jq -e . audit.json > /dev/null || {
+            echo "::error::cargo audit produced no parsable JSON report"
+            exit 1
+          }
+          vulns=$(jq '.vulnerabilities.count // 0' audit.json)
+          # `warnings` is an object keyed by kind (unmaintained, unsound,
+          # yanked); flatten every bucket to get one count.
+          warns=$(jq '[(.warnings // {})[][]] | length' audit.json)
+          {
+            echo "vulnerabilities=$vulns"
+            echo "warnings=$warns"
+            echo "total=$((vulns + warns))"
+          } >> "$GITHUB_OUTPUT"
+          echo "$vulns vulnerabilities, $warns warnings"
+
+      # printf with single quotes throughout: the body is full of markdown
+      # backticks, which bash would otherwise read as command substitution.
+      - name: Render the advisory summary
+        if: steps.audit.outputs.total != '0'
+        env:
+          VULNS: ${{ steps.audit.outputs.vulnerabilities }}
+          WARNS: ${{ steps.audit.outputs.warnings }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            printf '`cargo audit` found **%s** vulnerabilities and **%s** warnings in `Cargo.lock`.\n\n' \
+              "$VULNS" "$WARNS"
+            jq -r '
+              (.vulnerabilities.list[]? |
+                "- **\(.advisory.id)** — `\(.package.name) \(.package.version)`: \(.advisory.title)"),
+              ((.warnings // {}) | to_entries[] | .key as $kind | .value[] |
+                "- _\($kind)_ **\(.advisory.id // "no id")** — `\(.package.name) \(.package.version)`: \(.advisory.title // "no advisory metadata")")
+            ' audit.json
+            printf '\nReproduce with `cargo audit` locally. The **Dependency auto-fix**\n'
+            printf 'workflow runs an hour after this one and opens an update PR when a\n'
+            printf 'newer version clears the advisory.\n\n'
+            printf '<sub>Filed automatically by [this run](%s). Updated in place while the\n' "$RUN_URL"
+            printf 'advisories stand, and closed once the audit comes back clean.</sub>\n'
+          } > issue-body.md
+          cat issue-body.md
+
+      - name: File or refresh the tracking issue
+        if: steps.audit.outputs.total != '0'
+        run: |
+          number=$(gh issue list --state open --label automated-issue \
+            --json number,title \
+            --jq '[.[] | select(.title == $ENV.ISSUE_TITLE) | .number] | first // empty')
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file issue-body.md
+            echo "Refreshed #$number"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file issue-body.md \
+              --label security --label automated-issue
+          fi
+
+      # Symmetry matters: an issue nobody closes stops being a signal.
+      - name: Close the tracking issue when the audit is clean
+        if: steps.audit.outputs.total == '0'
+        run: |
+          number=$(gh issue list --state open --label automated-issue \
+            --json number,title \
+            --jq '[.[] | select(.title == $ENV.ISSUE_TITLE) | .number] | first // empty')
+          if [ -z "$number" ]; then
+            echo "No open advisory issue — nothing to close."
+            exit 0
+          fi
+          gh issue close "$number" \
+            --comment 'cargo audit is clean as of this run — closing automatically.'
+
+      # Red run, not just a filed issue: this is what auto-fix.yml watches
+      # for, and what makes a vulnerable main visible on the branch list.
+      - name: Fail the run while advisories stand
+        if: steps.audit.outputs.total != '0'
+        run: |
+          echo "::error::cargo audit reported ${{ steps.audit.outputs.total }} advisories — see the tracking issue"
+          exit 1
+
   # External links in docs — checked here (not per-PR) so a flaky or
   # rate-limiting third-party site can't fail unrelated PRs.
   external-links:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # ubuntu-latest, not 22.04: the prebuilt lychee binary needs glibc >= 2.38
     runs-on: ubuntu-latest
     steps:
