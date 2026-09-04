@@ -118,6 +118,20 @@ jobs:
               --label security --label automated-issue
           fi
 
+      # Symmetry matters: an issue nobody closes stops being a signal.
+      - name: Close the tracking issue when the audit is clean
+        if: steps.audit.outputs.total == '0'
+        run: |
+          number=$(gh issue list --state open --label automated-issue \
+            --json number,title \
+            --jq '[.[] | select(.title == $ENV.ISSUE_TITLE) | .number] | first // empty')
+          if [ -z "$number" ]; then
+            echo "No open advisory issue — nothing to close."
+            exit 0
+          fi
+          gh issue close "$number" \
+            --comment 'cargo audit is clean as of this run — closing automatically.'
+
   # External links in docs — checked here (not per-PR) so a flaky or
   # rate-limiting third-party site can't fail unrelated PRs.
   external-links:
