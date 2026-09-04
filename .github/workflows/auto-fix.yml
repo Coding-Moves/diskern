@@ -36,3 +36,29 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2
+
+      # `cargo audit fix` sits behind a non-default feature, so this one has
+      # to be compiled — no prebuilt binary carries it.
+      - name: Install cargo-audit with the fix subcommand
+        run: cargo install cargo-audit --features=fix --locked
+
+      # Best effort. `fix` is experimental and rewrites version requirements
+      # in the manifests; when it can't help, `cargo update` still runs.
+      - name: Apply advisory fixes
+        run: cargo audit fix || echo "cargo audit fix applied nothing"
+
+      # Refreshes Cargo.lock inside the existing semver ranges — this is what
+      # picks up patch releases that quietly clear an advisory.
+      - name: Update the lockfile
+        run: cargo update
+
+      - name: Check whether anything moved
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Dependencies already current — no PR to open."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
