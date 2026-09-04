@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use diskern_core::{report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,7 +26,31 @@ enum Command {
         /// Show at most N findings per category; 0 shows every one
         #[arg(long, value_name = "N", default_value_t = 5)]
         top: usize,
+        /// Only show findings with this verdict
+        #[arg(long, value_enum)]
+        verdict: Option<VerdictFilter>,
     },
+}
+
+/// Mirrors `Verdict` for clap. The core enum can't derive `ValueEnum`
+/// without diskern-core taking a dependency on the CLI's argument parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum VerdictFilter {
+    Safe,
+    Review,
+    Risky,
+    Protected,
+}
+
+impl From<VerdictFilter> for Verdict {
+    fn from(v: VerdictFilter) -> Self {
+        match v {
+            VerdictFilter::Safe => Verdict::Safe,
+            VerdictFilter::Review => Verdict::Review,
+            VerdictFilter::Risky => Verdict::Risky,
+            VerdictFilter::Protected => Verdict::Protected,
+        }
+    }
 }
 
 /// Bytes at the largest unit that keeps the number short. Decimal units,
@@ -150,7 +174,12 @@ fn print_findings(findings: &[&Finding], top: usize) {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Scan { roots, json, top } => {
+        Command::Scan {
+            roots,
+            json,
+            top,
+            verdict,
+        } => {
             let opts = scanner::ScanOptions {
                 roots,
                 ..Default::default()
@@ -169,10 +198,19 @@ fn main() -> Result<()> {
                     report.findings.len(),
                     report.duplicate_sets.len()
                 );
-                let findings: Vec<&Finding> = report.findings.iter().collect();
+                // Filter after the summary line, so the headline totals
+                // still describe the whole scan rather than the slice.
+                let wanted = verdict.map(Verdict::from);
+                let findings: Vec<&Finding> = report
+                    .findings
+                    .iter()
+                    .filter(|f| wanted.is_none_or(|v| f.verdict == v))
+                    .collect();
                 print_findings(&findings, top);
 
-                if !report.duplicate_sets.is_empty() {
+                // Duplicates have no verdict of their own, so a --verdict
+                // filter is asking about findings only; hide them then.
+                if verdict.is_none() && !report.duplicate_sets.is_empty() {
                     let wasted: u64 = report.duplicate_sets.iter().map(|d| d.wasted).sum();
                     println!();
                     println!(
