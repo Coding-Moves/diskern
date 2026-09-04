@@ -26,6 +26,23 @@ enum Command {
     },
 }
 
+/// Bytes at the largest unit that keeps the number short. Decimal units,
+/// matching what disk vendors and the rest of the UI report.
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = n as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{n} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -43,16 +60,16 @@ fn main() -> Result<()> {
             } else {
                 println!("Scanned {} files.", report.files_scanned);
                 println!(
-                    "Reclaimable: {:.2} GB across {} findings and {} duplicate sets.",
-                    report.total_reclaimable as f64 / 1e9,
+                    "Reclaimable: {} across {} findings and {} duplicate sets.",
+                    human_bytes(report.total_reclaimable),
                     report.findings.len(),
                     report.duplicate_sets.len()
                 );
                 for set in report.duplicate_sets.iter().take(10) {
                     println!(
-                        "  dup x{}  {:.1} MB wasted  {}",
+                        "  dup x{}  {} wasted  {}",
                         set.paths.len(),
-                        set.wasted as f64 / 1e6,
+                        human_bytes(set.wasted),
                         set.paths[0].display()
                     );
                 }
@@ -60,4 +77,23 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::human_bytes;
+
+    #[test]
+    fn scales_to_a_readable_unit() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(999), "999 B");
+        assert_eq!(human_bytes(1_000), "1.0 KB");
+        assert_eq!(human_bytes(1_500_000), "1.5 MB");
+        assert_eq!(human_bytes(2_300_000_000), "2.3 GB");
+    }
+
+    #[test]
+    fn stops_at_the_largest_unit_it_knows() {
+        assert_eq!(human_bytes(u64::MAX), "18446744.1 TB");
+    }
 }
