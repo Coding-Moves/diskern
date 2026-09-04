@@ -109,3 +109,21 @@ jobs:
             --color 0366D6 --description "Pull requests that update a dependency file"
           gh label create rust --force \
             --color 000000 --description "Pull requests that update rust code"
+
+      - name: Open the update PR
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: ${{ github.event.repository.default_branch }}
+          branch: automation/cargo-update
+          delete-branch: true
+          commit-message: "chore(deps): refresh Rust dependencies"
+          title: "chore(deps): refresh Rust dependencies"
+          body-path: pr-body.md
+          labels: |
+            dependencies
+            rust
+            security
+          assignees: Muawiya-contact
+          reviewers: Muawiya-contact
