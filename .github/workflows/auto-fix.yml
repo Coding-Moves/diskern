@@ -1,0 +1,38 @@
+# Turns a red audit into a reviewable PR instead of a chore. Runs on a
+# schedule, on demand, and immediately after Audit finishes red.
+#
+# Note: PRs opened with GITHUB_TOKEN do not start other workflows, so the
+# PR this opens arrives without CI. See docs/DEPENDENCY-AUTOMATION.md for
+# the PAT swap that fixes it; the checks below run here in the meantime.
+name: Dependency auto-fix
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC, an hour after Audit
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Audit]
+    types: [completed]
+
+permissions:
+  contents: write # push the update branch
+  pull-requests: write # open and label the PR
+  issues: write # create the labels the PR is filed under
+
+# One update branch, one writer. A scheduled run and an audit-triggered
+# run must never race each other onto it.
+concurrency:
+  group: dependency-auto-fix
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # A green audit has nothing to chase.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
