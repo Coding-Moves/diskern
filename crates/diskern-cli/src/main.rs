@@ -59,7 +59,10 @@ fn human_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = n as f64;
     let mut unit = 0;
-    while value >= 1000.0 && unit < UNITS.len() - 1 {
+    // 999.95, not 1000.0: at one decimal place anything at or above that
+    // rounds to "1000.0", which belongs in the next unit up. Choosing the
+    // unit before rounding printed 999_999 as "1000.0 KB".
+    while value >= 999.95 && unit < UNITS.len() - 1 {
         value /= 1000.0;
         unit += 1;
     }
@@ -262,6 +265,13 @@ mod tests {
         assert_eq!(human_bytes(1_000), "1.0 KB");
         assert_eq!(human_bytes(1_500_000), "1.5 MB");
         assert_eq!(human_bytes(2_300_000_000), "2.3 GB");
+    }
+
+    #[test]
+    fn rolls_over_instead_of_printing_a_four_digit_mantissa() {
+        assert_eq!(human_bytes(999_949), "999.9 KB");
+        assert_eq!(human_bytes(999_999), "1.0 MB");
+        assert_eq!(human_bytes(999_999_999), "1.0 GB");
     }
 
     #[test]
