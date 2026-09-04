@@ -21,7 +21,9 @@ impl ActiveScan {
     /// to unlock would leave cancellation permanently broken for the rest of
     /// the session — so recover the value instead.
     fn slot(&self) -> MutexGuard<'_, Option<Arc<scanner::ScanProgress>>> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 

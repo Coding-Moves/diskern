@@ -153,7 +153,11 @@ fn print_findings(findings: &[&Finding], top: usize) {
                 human_bytes(subtotal)
             );
 
-            let shown = if top == 0 { items.len() } else { top.min(items.len()) };
+            let shown = if top == 0 {
+                items.len()
+            } else {
+                top.min(items.len())
+            };
             for f in &items[..shown] {
                 println!(
                     "    {:>9}  {}",
