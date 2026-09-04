@@ -94,3 +94,18 @@ jobs:
             printf 'the size GitHub will render; run the commands locally for the full output.</sub>\n'
           } > pr-body.md
           wc -c pr-body.md
+
+      # create-pull-request fails the whole step on an unknown label rather
+      # than opening the PR unlabelled, and `security` only exists once
+      # audit.yml has run at least once. --force keeps this idempotent.
+      - name: Ensure the PR labels exist
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create security --force \
+            --color B60205 --description "Security advisory or hardening"
+          gh label create dependencies --force \
+            --color 0366D6 --description "Pull requests that update a dependency file"
+          gh label create rust --force \
+            --color 000000 --description "Pull requests that update rust code"
