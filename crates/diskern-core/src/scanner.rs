@@ -13,7 +13,10 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanOptions {
     pub roots: Vec<PathBuf>,
-    /// Glob-style excludes (e.g. "/proc", "C:\\Windows\\WinSxS").
+    /// Directories never walked, given as paths rather than globs
+    /// (e.g. "/proc", "C:\\Windows\\WinSxS"). Matched on whole path
+    /// components after the same normalization the rules database uses,
+    /// so case and separator style don't have to line up with the root.
     pub excludes: Vec<String>,
     pub follow_symlinks: bool, // default false — symlink loops are real
     pub min_file_size: u64,    // skip tiny files for dedup purposes
@@ -78,7 +81,9 @@ fn walk_root(
     progress: &ScanProgress,
     out: &mut Vec<FileEntry>,
 ) -> Result<()> {
-    let excludes = opts.excludes.clone();
+    // Normalized once, not per directory: `process_read_dir` runs on every
+    // directory the walk opens, and the exclude list never changes.
+    let excludes: Vec<String> = opts.excludes.iter().map(|e| normalize_exclude(e)).collect();
 
     let walker = jwalk::WalkDir::new(root)
         .follow_links(opts.follow_symlinks)
@@ -121,9 +126,35 @@ fn walk_root(
     Ok(())
 }
 
+/// Same shape the rules database matches in: lowercased, `/`-separated,
+/// no trailing separator. An exclude written `C:\\Windows\\WinSxS` has to
+/// match a root the user typed as `c:\\windows\\winsxs`, and
+/// `rules::classify` already normalizes for exactly that reason.
+fn normalize_exclude(exclude: &str) -> String {
+    let normalized = exclude.replace('\\', "/").to_lowercase();
+    let trimmed = normalized.trim_end_matches('/');
+    // "/" itself trims to empty; keep it as the root rather than a prefix
+    // that matches every path.
+    if trimmed.is_empty() {
+        normalized
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// True when `path` *is* an excluded directory or sits inside one.
+///
+/// Compared on whole path components. A raw `starts_with` on the string
+/// made `/run` exclude `/runtime-data` as well, because "/run" is a prefix
+/// of "/runtime-data" in characters but not in directories.
 fn is_excluded(path: &Path, excludes: &[String]) -> bool {
-    let p = path.to_string_lossy();
-    excludes.iter().any(|ex| p.starts_with(ex.as_str()))
+    let p = crate::rules::normalize(path);
+    let p = p.trim_end_matches('/');
+    excludes.iter().any(|ex| {
+        p == ex
+            || p.strip_prefix(ex.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn to_epoch(t: std::time::SystemTime) -> Option<i64> {
@@ -135,6 +166,31 @@ fn to_epoch(t: std::time::SystemTime) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excludes_match_whole_components_not_characters() {
+        let excludes = ["/run".to_string()];
+        assert!(is_excluded(Path::new("/run"), &excludes));
+        assert!(is_excluded(Path::new("/run/user/1000/x"), &excludes));
+        // The bug: a character-prefix compare skipped this too.
+        assert!(!is_excluded(Path::new("/runtime-data/x"), &excludes));
+        assert!(!is_excluded(Path::new("/runner"), &excludes));
+    }
+
+    #[test]
+    fn excludes_survive_a_differently_cased_or_separated_root() {
+        let excludes = [normalize_exclude("C:\\Windows\\WinSxS")];
+        assert!(is_excluded(Path::new("c:/windows/winsxs/component/x.dll"), &excludes));
+        assert!(is_excluded(Path::new("C:\\Windows\\WinSxS\\x.dll"), &excludes));
+        assert!(!is_excluded(Path::new("c:/windows/winsxs-backup/x.dll"), &excludes));
+    }
+
+    #[test]
+    fn a_trailing_separator_on_an_exclude_changes_nothing() {
+        let excludes = [normalize_exclude("/proc/")];
+        assert!(is_excluded(Path::new("/proc/1/maps"), &excludes));
+        assert!(!is_excluded(Path::new("/process-data/x"), &excludes));
+    }
 
     #[test]
     fn scans_a_temp_tree() {
