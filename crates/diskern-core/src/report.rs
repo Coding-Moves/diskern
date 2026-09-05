@@ -421,16 +421,19 @@ mod tests {
         )
         .unwrap();
 
-        let find = |needle: &str| {
+        // Compared as paths, not as substrings of one: Windows separates
+        // with `\`, so "live/node_modules" matches nothing there.
+        let find = |root: &std::path::Path| {
+            let wanted = root.join("node_modules").join("react").join("index.js");
             report
                 .findings
                 .iter()
-                .find(|f| f.entry.path.to_string_lossy().contains(needle))
-                .unwrap()
+                .find(|f| f.entry.path == wanted)
+                .unwrap_or_else(|| panic!("no finding for {}", wanted.display()))
                 .clone()
         };
 
-        let referenced = find("live/node_modules");
+        let referenced = find(&live);
         assert_eq!(referenced.verdict, Verdict::Risky);
         assert!(referenced
             .reasons
@@ -440,7 +443,7 @@ mod tests {
         // offer either.
         assert_eq!(referenced.reclaimable, 0);
 
-        let abandoned = find("dead/node_modules");
+        let abandoned = find(&dead);
         assert_eq!(abandoned.verdict, Verdict::Review);
         assert!(!abandoned
             .reasons

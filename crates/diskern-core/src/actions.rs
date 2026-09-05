@@ -566,12 +566,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let q = dir.path().join("quarantine");
         // Raw bytes no UTF-8 decoder accepts, in an otherwise ordinary
-        // name: a legal filename on this platform, and one a scan of a
-        // real disk turns up in downloads unpacked from old archives.
+        // name: a legal filename on Linux, and one a scan of a real disk
+        // turns up in downloads unpacked from old archives.
         let victim = dir
             .path()
             .join(std::ffi::OsStr::from_bytes(b"photo-\xff\xfe.dmg"));
-        std::fs::write(&victim, b"payload").unwrap();
+
+        match std::fs::write(&victim, b"payload") {
+            Ok(()) => {}
+            // macOS validates filenames as UTF-8 in the filesystem itself
+            // and answers EILSEQ, so a name like this cannot exist there
+            // and the loss it caused is not reachable. Linux imposes no
+            // such rule, which is why this is checked rather than skipped
+            // by a `cfg`: if the fixture ever stops being creatable on
+            // Linux, that is a failure and not a quiet pass.
+            Err(_) if cfg!(target_os = "macos") => return,
+            Err(e) => panic!("could not create the fixture: {e}"),
+        }
 
         let err = quarantine(&victim, Verdict::Review, &q).unwrap_err();
         assert!(
