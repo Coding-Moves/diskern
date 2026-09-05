@@ -256,14 +256,11 @@ mod tests {
     /// whole module exists to tell apart from the one above.
     #[test]
     fn an_unreferenced_store_is_referenced_by_nobody() {
-        let graph = ImpactGraph::from_entries(&entries(&[
-            "/home/u/old-thing/node_modules/react/index.js",
-        ]));
+        let graph =
+            ImpactGraph::from_entries(&entries(&["/home/u/old-thing/node_modules/react/index.js"]));
 
         assert_eq!(
-            graph.referencing_projects(Path::new(
-                "/home/u/old-thing/node_modules/react/index.js"
-            )),
+            graph.referencing_projects(Path::new("/home/u/old-thing/node_modules/react/index.js")),
             0
         );
     }

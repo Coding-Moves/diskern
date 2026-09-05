@@ -177,7 +177,11 @@ mod tests {
         let never = AtomicBool::new(false);
         let sets = find_duplicates_filtered(
             &mut entries,
-            |_, e| e.path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("keep")),
+            |_, e| {
+                e.path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("keep"))
+            },
             &never,
         )
         .unwrap();

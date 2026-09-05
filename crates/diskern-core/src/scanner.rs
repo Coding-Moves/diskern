@@ -175,9 +175,18 @@ mod tests {
     #[test]
     fn excludes_survive_a_differently_cased_or_separated_root() {
         let excludes = [normalize_exclude("C:\\Windows\\WinSxS")];
-        assert!(is_excluded(Path::new("c:/windows/winsxs/component/x.dll"), &excludes));
-        assert!(is_excluded(Path::new("C:\\Windows\\WinSxS\\x.dll"), &excludes));
-        assert!(!is_excluded(Path::new("c:/windows/winsxs-backup/x.dll"), &excludes));
+        assert!(is_excluded(
+            Path::new("c:/windows/winsxs/component/x.dll"),
+            &excludes
+        ));
+        assert!(is_excluded(
+            Path::new("C:\\Windows\\WinSxS\\x.dll"),
+            &excludes
+        ));
+        assert!(!is_excluded(
+            Path::new("c:/windows/winsxs-backup/x.dll"),
+            &excludes
+        ));
     }
 
     #[test]

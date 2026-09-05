@@ -227,9 +227,8 @@ pub fn manifest_path(quarantine_dir: &Path) -> PathBuf {
 
 fn append_to_manifest(quarantine_dir: &Path, record: &QuarantineRecord) -> Result<()> {
     let path = manifest_path(quarantine_dir);
-    let line = serde_json::to_string(record).map_err(|e| {
-        GenomeError::Rules(format!("could not serialize a quarantine record: {e}"))
-    })?;
+    let line = serde_json::to_string(record)
+        .map_err(|e| GenomeError::Rules(format!("could not serialize a quarantine record: {e}")))?;
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)

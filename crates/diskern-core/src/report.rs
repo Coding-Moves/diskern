@@ -366,7 +366,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.findings.len(), 2);
-        assert!(report.findings.iter().all(|f| f.verdict == Verdict::Protected));
+        assert!(report
+            .findings
+            .iter()
+            .all(|f| f.verdict == Verdict::Protected));
         assert!(report.duplicate_sets.is_empty());
         assert_eq!(report.total_reclaimable, 0);
     }
@@ -427,7 +430,10 @@ mod tests {
 
         let abandoned = find("dead/node_modules");
         assert_eq!(abandoned.verdict, Verdict::Review);
-        assert!(!abandoned.reasons.iter().any(|r| r.starts_with("referenced by")));
+        assert!(!abandoned
+            .reasons
+            .iter()
+            .any(|r| r.starts_with("referenced by")));
         assert_eq!(abandoned.reclaimable, 4);
     }
 }

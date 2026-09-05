@@ -250,9 +250,15 @@ mod tests {
                 "C:\\Users\\x\\AppData\\Local\\Temp\\a.tmp",
                 Category::TempFile,
             ),
-            ("/home/u/proj/node_modules/react/index.js", Category::BuildArtifact),
+            (
+                "/home/u/proj/node_modules/react/index.js",
+                Category::BuildArtifact,
+            ),
             ("/home/u/proj/target/debug/app", Category::BuildArtifact),
-            ("/home/u/.cache/pip/wheels/a.whl", Category::PackageManagerCache),
+            (
+                "/home/u/.cache/pip/wheels/a.whl",
+                Category::PackageManagerCache,
+            ),
         ] {
             let (cat, _, _) = db.classify(std::path::Path::new(path));
             assert_eq!(cat, expected, "{path}");

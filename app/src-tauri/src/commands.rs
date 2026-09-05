@@ -51,11 +51,7 @@ struct ScanRun<'a> {
 }
 
 impl<'a> ScanRun<'a> {
-    fn start(
-        window: &Window,
-        state: &'a ActiveScan,
-        progress: Arc<scanner::ScanProgress>,
-    ) -> Self {
+    fn start(window: &Window, state: &'a ActiveScan, progress: Arc<scanner::ScanProgress>) -> Self {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         // A plain OS thread keeps this independent of whatever async
