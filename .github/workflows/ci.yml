@@ -46,8 +46,12 @@ jobs:
       - uses: swatinem/rust-cache@v2
       # Core + CLI only: building the Tauri crate needs webkitgtk, which
       # lints of the library don't need. `app-tauri` below covers the shell.
+      #
+      # --all-targets so tests are linted too. `cargo test` compiles test
+      # code but applies no lints to it, so without this the suite — by now
+      # a good half of the crate — drifts unlinted while CI stays green.
       - run: cargo fmt --check
-      - run: cargo clippy -p diskern-core -p diskern-cli -- -D warnings
+      - run: cargo clippy -p diskern-core -p diskern-cli --all-targets -- -D warnings
 
   # The engine's behaviour is platform-specific in ways a run on one OS
   # cannot reach, and it ships on more than one: `default_excludes` has a
