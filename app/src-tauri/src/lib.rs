@@ -19,6 +19,9 @@ pub fn run() {
             commands::start_scan,
             commands::cancel_scan,
             commands::quarantine_finding,
+            commands::list_quarantine,
+            commands::restore_quarantined,
+            commands::purge_quarantine,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Diskern");

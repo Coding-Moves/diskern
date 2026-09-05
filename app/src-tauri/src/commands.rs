@@ -214,3 +214,51 @@ pub async fn quarantine_finding(
     .await
     .map_err(|e| e.to_string())?
 }
+
+/// Everything still in quarantine, read from the manifest on disk.
+///
+/// Read-only. This is what makes quarantine reversible across restarts:
+/// before the manifest existed, the record of where a file came from lived
+/// only in the value `quarantine_finding` returned, and the UI dropped it.
+#[tauri::command]
+pub async fn list_quarantine(
+    quarantine_dir: PathBuf,
+) -> Result<Vec<actions::QuarantineRecord>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::list(&quarantine_dir).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Put one quarantined file back where it came from.
+///
+/// Addressed by its path *in quarantine*, which is the unique one — the
+/// same original can be quarantined, restored and quarantined again. The
+/// manifest is consulted first, so a path the frontend invented reaches
+/// no file.
+#[tauri::command]
+pub async fn restore_quarantined(
+    quarantine_dir: PathBuf,
+    quarantined_to: PathBuf,
+) -> Result<actions::QuarantineRecord, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::restore_from_manifest(&quarantine_dir, &quarantined_to).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Empty quarantine for good.
+///
+/// The one command in Diskern that deletes anything, and it deletes only
+/// the files the manifest lists — the ones this app moved there. The UI
+/// confirms first; this is past the point of no return.
+#[tauri::command]
+pub async fn purge_quarantine(quarantine_dir: PathBuf) -> Result<actions::PurgeSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::purge(&quarantine_dir).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
