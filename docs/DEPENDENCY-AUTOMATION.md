@@ -35,6 +35,53 @@ The job then fails, which is what auto-fix watches for.
 Both labels are created by the workflow if the repository doesn't have
 them yet, so this needs no manual setup.
 
+## The ignore list
+
+Some advisories cannot be fixed here. They arrive through `tauri`, and
+clearing them needs a release Tauri has not made yet. Those are listed,
+with a reason each, in [`.cargo/audit.toml`](../.cargo/audit.toml).
+
+The whole list today is one dependency: Tauri v2 renders on Linux through
+webkit2gtk-4.1, which links the **gtk-rs GTK3 bindings**. Those bindings
+were archived upstream in 2024 — ten crates, plus `glib`'s unsound
+`VariantStrIter` (fixed in the 0.19 line the GTK3 bindings never moved
+to), plus `proc-macro-error` via `glib-macros`. The five `unic-*` crates
+come the same way, via `urlpattern` in `tauri-utils`. Confirm any of it
+with:
+
+```
+cargo tree -i gtk --target x86_64-unknown-linux-gnu
+```
+
+None of them is a *vulnerability*. `cargo audit` reports zero of those
+against this lockfile; all seventeen are informational — sixteen
+unmaintained, one unsound.
+
+**Why ignore rather than leave them red.** The audit job fails while
+advisories stand, and auto-fix opens a PR when a version clears one.
+Neither has anywhere to go here: there is no newer version, so the audit
+stays red forever and the auto-fix PR is empty every week. A check that
+is always red stops being read, and then the eighteenth advisory — the
+one that *is* a vulnerability, in a crate we chose — arrives into a run
+nobody looks at. The list buys back a green baseline.
+
+**What it does not do.** `ignore` suppresses exactly the ids named. A new
+advisory against any of these same crates still fails the run, as does
+any advisory anywhere else in the tree. The ids are also printed into the
+job summary on every run, so a suppression cannot quietly outlive its
+reason.
+
+**Reviewing it.** Re-check when Tauri ships a GTK4/webkit6 Linux runtime,
+and otherwise every few months. To test whether an entry can go, delete
+the line and run `cargo audit`: if it stays quiet, the advisory is gone
+and so should the line be.
+
+Two places consume the list. `cargo audit` reads `.cargo/audit.toml`
+itself. `rustsec/audit-check`, which runs on pull requests, does not — it
+only takes an `ignore` input — so the workflow greps the ids out of the
+file and passes them in, rather than keeping a second list to drift from
+the first.
+
 ## Auto-fix
 
 Runs `cargo audit fix` (raises a version requirement when clearing the
