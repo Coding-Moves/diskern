@@ -49,6 +49,11 @@ All notable changes to Diskern are documented here. The format follows
 
 - Restoring a quarantined file across filesystems no longer fails with
   `EXDEV`
+- Restore refuses when something is already at the original path, rather
+  than overwriting it — quarantine a cache, keep using the app, change
+  your mind, and the file the app rebuilt survives
+- A file whose path can't be recorded in the manifest is not moved at
+  all, instead of being moved and then losing its record
 - The scan progress ticker thread stops from a guard, so a panicking or
   cancelled scan can't leave it emitting for the rest of the process
 - Two files that flatten to the same quarantine name no longer overwrite
