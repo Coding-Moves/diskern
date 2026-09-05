@@ -30,6 +30,9 @@ rayon = "1"
 petgraph = "0.8"
 dashmap = "6"
 
+# Path matching for the rules database
+globset = "0.4"
+
 [profile.release]
 lto = "thin"
 strip = true

@@ -118,3 +118,10 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 
 /* A cancelled scan is an outcome, not a failure — deliberately not .error. */
 .notice { opacity: 0.75; font-size: 0.9rem; }
+
+/* Quarantine: the undo list. Deliberately closed by default — it's a
+   safety net, not the thing you came here to look at. */
+.quarantine-note { font-size: 0.82rem; opacity: 0.75; margin: 0.5rem 0 0; }
+.purge { margin-top: 0.75rem; }
+.purge .confirm { flex-wrap: wrap; }
+.purge .confirm-q { color: #c0392b; opacity: 1; }

@@ -37,10 +37,42 @@ pub fn find_duplicates_cancellable(
     entries: &mut [FileEntry],
     cancelled: &AtomicBool,
 ) -> Option<Vec<DuplicateSet>> {
+    find_duplicates_filtered(entries, |_, _| true, cancelled)
+}
+
+/// [`find_duplicates_cancellable`], restricted to the entries `eligible`
+/// accepts.
+///
+/// Duplicate sets are an *offer*: "you are storing this three times, keep
+/// one". An entry the user is never allowed to act on doesn't belong in
+/// that offer, and hashing it is work spent to produce a number nobody can
+/// use. `eligible` is where the caller says which entries those are; it is
+/// called exactly once per entry, before any hashing.
+///
+/// The index comes along because the interesting callers have already
+/// worked something out per entry — `report` classifies first — and
+/// looking that answer up by position beats re-deriving it or keeping a
+/// set of paths the size of the disk.
+pub fn find_duplicates_filtered<F>(
+    entries: &mut [FileEntry],
+    eligible: F,
+    cancelled: &AtomicBool,
+) -> Option<Vec<DuplicateSet>>
+where
+    F: Fn(usize, &FileEntry) -> bool,
+{
+    let keep: Vec<bool> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| eligible(i, e))
+        .collect();
+
     // Stage 1: bucket by size.
     let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
     for (i, e) in entries.iter().enumerate() {
-        by_size.entry(e.size).or_default().push(i);
+        if keep[i] {
+            by_size.entry(e.size).or_default().push(i);
+        }
     }
     let candidates: Vec<usize> = by_size
         .into_values()
@@ -68,11 +100,14 @@ pub fn find_duplicates_cancellable(
         entries[i].hash = h;
     }
 
-    // Stage 3: bucket by hash.
+    // Stage 3: bucket by hash. Only stage-1 survivors carry one, but the
+    // eligibility check is repeated here so a caller reusing entries that
+    // already hold hashes from an earlier run can't smuggle them back in.
     let mut by_hash: HashMap<&str, Vec<&FileEntry>> = HashMap::new();
-    for e in entries.iter() {
-        if let Some(h) = &e.hash {
-            by_hash.entry(h).or_default().push(e);
+    for (i, e) in entries.iter().enumerate() {
+        match &e.hash {
+            Some(h) if keep[i] => by_hash.entry(h).or_default().push(e),
+            _ => continue,
         }
     }
 
@@ -124,6 +159,43 @@ mod tests {
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].paths.len(), 2);
         assert_eq!(sets[0].wasted, 10);
+    }
+
+    #[test]
+    fn ineligible_entries_form_no_sets() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a"), b"same-bytes").unwrap();
+        std::fs::write(dir.path().join("b"), b"same-bytes").unwrap();
+        std::fs::write(dir.path().join("keep-a"), b"other-byte").unwrap();
+        std::fs::write(dir.path().join("keep-b"), b"other-byte").unwrap();
+
+        let opts = ScanOptions {
+            roots: vec![dir.path().to_path_buf()],
+            ..Default::default()
+        };
+        let mut entries = scan(&opts, Arc::new(ScanProgress::default())).unwrap();
+        let never = AtomicBool::new(false);
+        let sets = find_duplicates_filtered(
+            &mut entries,
+            |_, e| {
+                e.path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("keep"))
+            },
+            &never,
+        )
+        .unwrap();
+
+        assert_eq!(sets.len(), 1);
+        assert!(sets[0].paths.iter().all(|p| p
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("keep"))));
+        // Excluded entries are never hashed, so they cost nothing either.
+        for entry in &entries {
+            if entry.path.file_name().is_some_and(|n| n == "a") {
+                assert!(entry.hash.is_none());
+            }
+        }
     }
 
     #[test]

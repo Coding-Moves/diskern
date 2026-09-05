@@ -1,0 +1,58 @@
+# cargo-audit configuration.
+#
+# Everything listed below is an *informational* advisory (unmaintained or
+# unsound), not a vulnerability. `cargo audit` reports zero vulnerabilities
+# in this lockfile and this file does not change that: it only suppresses
+# the ids named here, so a real advisory — including a new one against any
+# of these same crates — still fails the run.
+#
+# Every id here reaches the lockfile through `tauri`, is a Linux-desktop
+# dependency, and has no version that clears it. Diskern cannot fix them by
+# updating; Tauri has to move off GTK3 first. Keeping them permanently red
+# would train everyone to ignore a red audit, which is a worse security
+# outcome than an explicit, reviewed list.
+#
+# The reasoning, the review cadence, and how to check whether an entry can
+# be dropped are in docs/DEPENDENCY-AUTOMATION.md.
+#
+# Reviewed: 2026-09-05. Re-check when Tauri ships a GTK4/webkit6 runtime.
+
+[advisories]
+ignore = [
+  # ---------------------------------------------------------------
+  # gtk-rs GTK3 bindings — archived upstream, no successor at 0.18.
+  # tauri 2.11 -> gtk 0.18 / webkit2gtk / tao / muda. The successor
+  # (gtk4-rs) is not what Tauri v2 links against on Linux.
+  # ---------------------------------------------------------------
+  "RUSTSEC-2024-0413", # atk
+  "RUSTSEC-2024-0416", # atk-sys
+  "RUSTSEC-2024-0412", # gdk
+  "RUSTSEC-2024-0418", # gdk-sys
+  "RUSTSEC-2024-0411", # gdkwayland-sys
+  "RUSTSEC-2024-0417", # gdkx11
+  "RUSTSEC-2024-0414", # gdkx11-sys
+  "RUSTSEC-2024-0415", # gtk
+  "RUSTSEC-2024-0420", # gtk-sys
+  "RUSTSEC-2024-0419", # gtk3-macros
+
+  # glib 0.18.5 — unsound VariantStrIter. The fix landed in the 0.19
+  # line, which the archived GTK3 bindings above never moved to. The
+  # unsound function is glib's own GVariant iteration; nothing in
+  # Diskern calls it, and the GTK3 stack that does is the one Tauri
+  # drives.
+  "RUSTSEC-2024-0429",
+
+  # proc-macro-error 1.0.4 — unmaintained, pulled in by glib-macros
+  # 0.18.5, so it leaves with the GTK3 bindings above. Build-time
+  # proc macro: it does not ship in the binary.
+  "RUSTSEC-2024-0370",
+
+  # unic-* 0.9.0 — unmaintained, all five via urlpattern 0.3 ->
+  # tauri-utils. Pure Unicode tables, no network or filesystem
+  # surface, and replacing urlpattern is Tauri's call not ours.
+  "RUSTSEC-2025-0081", # unic-char-property
+  "RUSTSEC-2025-0075", # unic-char-range
+  "RUSTSEC-2025-0080", # unic-common
+  "RUSTSEC-2025-0100", # unic-ucd-ident
+  "RUSTSEC-2025-0098", # unic-ucd-version
+]

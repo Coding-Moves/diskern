@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -92,7 +92,10 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
     <li className={`finding verdict-${f.verdict}`}>
       <span className="path">{f.entry.path}</span>
       <span className="size">{(f.entry.size / 1e6).toFixed(1)} MB</span>
-      <span className="why">{f.reasons[0]}</span>
+      {/* Every reason, not just the matched rule: "referenced by 3
+          projects" is what explains a risky row, and it is never the
+          first one. */}
+      <span className="why">{f.reasons.join(" · ")}</span>
 
       {canQuarantine && (
         <span className="row-action">
@@ -200,6 +203,145 @@ function DuplicatesSection({ sets }) {
 }
 
 /**
+ * What is sitting in quarantine right now, read back from the manifest on
+ * disk rather than from anything this session remembers.
+ *
+ * That distinction is the point. Quarantine is only "reversible" if the
+ * record of where a file came from outlives the window it was moved in —
+ * before the manifest existed, closing the app stranded every quarantined
+ * file with a flattened filename nobody could read an original path out
+ * of. So this renders whether or not a scan has been run.
+ */
+function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
+  const [records, setRecords] = useState([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [error, setError] = useState(null);
+  const [busyPath, setBusyPath] = useState(null);
+  const [purgePhase, setPurgePhase] = useState("idle"); // idle | confirming | working
+  const [purgeNotice, setPurgeNotice] = useState(null);
+
+  const reload = useCallback(async () => {
+    if (!quarantineDir) return;
+    try {
+      setRecords(await invoke("list_quarantine", { quarantineDir }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [quarantineDir]);
+
+  useEffect(() => {
+    reload();
+  }, [reload, refreshKey]);
+
+  async function restore(record) {
+    setError(null);
+    setBusyPath(record.quarantined_to);
+    try {
+      await invoke("restore_quarantined", {
+        quarantineDir,
+        quarantinedTo: record.quarantined_to,
+      });
+      onRestored(record);
+      await reload();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyPath(null);
+    }
+  }
+
+  async function purge() {
+    setError(null);
+    setPurgePhase("working");
+    try {
+      const summary = await invoke("purge_quarantine", { quarantineDir });
+      setPurgeNotice(
+        `Deleted ${summary.files_removed} file${summary.files_removed === 1 ? "" : "s"}` +
+          ` · ${(summary.bytes_removed / 1e6).toFixed(1)} MB freed` +
+          (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
+      );
+      await reload();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPurgePhase("idle");
+    }
+  }
+
+  // Nothing quarantined and nothing to say about it: stay out of the way.
+  if (records.length === 0 && !error && !purgeNotice) return null;
+
+  return (
+    <section className="verdict-group quarantine">
+      <button className="group-header" onClick={() => setIsOpen(!isOpen)}>
+        <span className="chevron">{isOpen ? "▾" : "▸"}</span>
+        Quarantine
+        <span className="group-meta">
+          {records.length} file{records.length === 1 ? "" : "s"} · reversible
+        </span>
+      </button>
+      {isOpen && (
+        <div className="group-body">
+          <p className="quarantine-note">
+            Moved here, not deleted. Restore puts a file back where it came from.
+            Purge is the only thing in Diskern that deletes, and it deletes only
+            what is listed here.
+          </p>
+          <ul className="findings">
+            {records.map((r) => (
+              <li className="finding" key={r.quarantined_to}>
+                <span className="path">{r.original}</span>
+                <span className="size">
+                  {new Date(r.at_epoch * 1000).toLocaleString()}
+                </span>
+                <span className="row-action">
+                  {busyPath === r.quarantined_to ? (
+                    <span className="working">Restoring…</span>
+                  ) : (
+                    <button className="quarantine-btn" onClick={() => restore(r)}>
+                      Restore
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {records.length > 0 && (
+            <div className="purge">
+              {purgePhase === "idle" && (
+                <button className="cancel-btn" onClick={() => setPurgePhase("confirming")}>
+                  Purge quarantine
+                </button>
+              )}
+              {purgePhase === "confirming" && (
+                <span className="confirm">
+                  <span className="confirm-q">
+                    Delete {records.length} file{records.length === 1 ? "" : "s"} for good?
+                    This cannot be undone.
+                  </span>
+                  <button className="quarantine-btn confirm-yes" onClick={purge}>
+                    Delete
+                  </button>
+                  <button className="confirm-no" onClick={() => setPurgePhase("idle")}>
+                    Cancel
+                  </button>
+                </span>
+              )}
+              {purgePhase === "working" && <span className="working">Deleting…</span>}
+            </div>
+          )}
+
+          {purgeNotice && <p className="notice">{purgeNotice}</p>}
+          {error && <p className="error">{error}</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
  * Live "is this actually working" feedback while a scan runs.
  *
  * There's no true percentage to show — the total file count on disk isn't
@@ -243,6 +385,9 @@ export default function App() {
   const [quarantinedPaths, setQuarantinedPaths] = useState(() => new Set());
   const [reclaimed, setReclaimed] = useState(0);
   const [quarantineDir, setQuarantineDir] = useState(null);
+  // Bumped whenever this session moves a file in, so the quarantine list
+  // re-reads the manifest rather than guessing at what changed.
+  const [quarantineVersion, setQuarantineVersion] = useState(0);
   const unlistenRef = useRef(null);
 
   // Resolve a sensible, always-writable quarantine location once on mount:
@@ -279,6 +424,22 @@ export default function App() {
       return next;
     });
     setReclaimed((prev) => prev + finding.reclaimable);
+    setQuarantineVersion((v) => v + 1);
+  }
+
+  // A restored file is back on disk, so it belongs back in the report it
+  // came from — as a row again, and out of the reclaimed running total.
+  // A record with no matching finding (restored after a different scan, or
+  // after a restart) just isn't in this report; the list still refreshes.
+  function handleRestored(record) {
+    const finding = report?.findings.find((f) => f.entry.path === record.original);
+    setQuarantinedPaths((prev) => {
+      if (!prev.has(record.original)) return prev;
+      const next = new Set(prev);
+      next.delete(record.original);
+      return next;
+    });
+    if (finding) setReclaimed((prev) => Math.max(0, prev - finding.reclaimable));
   }
 
   // Cancelling races the scan finishing on its own; the command returns
@@ -366,6 +527,13 @@ export default function App() {
           )}
           {error && <p className="error">{error}</p>}
           {notice && <p className="notice">{notice}</p>}
+          {/* Rendered before any scan too: files quarantined in an earlier
+              session are restorable without scanning again. */}
+          <QuarantineSection
+            quarantineDir={quarantineDir}
+            refreshKey={quarantineVersion}
+            onRestored={handleRestored}
+          />
         </section>
       )}
 
@@ -391,6 +559,12 @@ export default function App() {
           )}
           {error && <p className="error">{error}</p>}
           {notice && <p className="notice">{notice}</p>}
+
+          <QuarantineSection
+            quarantineDir={quarantineDir}
+            refreshKey={quarantineVersion}
+            onRestored={handleRestored}
+          />
 
           <DuplicatesSection sets={report.duplicate_sets} />
           <CategorySection

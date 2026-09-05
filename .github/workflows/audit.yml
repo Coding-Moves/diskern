@@ -12,7 +12,9 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    paths: [Cargo.lock]
+    # The ignore list is part of what the audit means, so editing it has to
+    # re-run the audit just as moving the lockfile does.
+    paths: [Cargo.lock, .cargo/audit.toml]
 
 jobs:
   # PR-time advisory check: annotates the changed lockfile inline so the
@@ -26,9 +28,23 @@ jobs:
       checks: write # the action reports advisories as a check run
     steps:
       - uses: actions/checkout@v7
+
+      # `rustsec/audit-check` does not read .cargo/audit.toml — it only
+      # takes an `ignore` input — while the plain `cargo audit` in the job
+      # below does. Reading the ids out of the file keeps one source of
+      # truth instead of a second list that drifts from the first.
+      - name: Read the ignored advisories
+        id: ignored
+        run: |
+          ids=$(sed -n '/ignore *= *\[/,/^]/p' .cargo/audit.toml \
+            | grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' | paste -sd,)
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          echo "Ignoring: ${ids:-nothing}"
+
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: ${{ steps.ignored.outputs.ids }}
 
   # Off-PR runs own a single tracking issue for the whole lockfile: one
   # issue, kept current, rather than a fresh one every Monday.
@@ -57,6 +73,21 @@ jobs:
           gh label create automated-issue --force \
             --color C5DEF5 --description "Filed by a workflow, not a human"
 
+      # Visible, not silent: an ignore list nobody ever reads is how a
+      # suppressed advisory outlives the reason it was suppressed.
+      - name: Report the ignored advisories
+        run: |
+          {
+            echo "### Ignored advisories"
+            echo
+            sed -n '/ignore *= *\[/,/^]/p' .cargo/audit.toml \
+              | grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' | sed 's/^/- /'
+            echo
+            echo "Rationale and review cadence: docs/DEPENDENCY-AUTOMATION.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Reads .cargo/audit.toml from the working directory, so the ids
+      # above are already excluded from these counts.
       - name: Run cargo audit
         id: audit
         run: |

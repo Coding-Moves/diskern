@@ -10,7 +10,7 @@ time from [`crates/diskern-core/rules/base.json`](../crates/diskern-core/rules/b
 ```json
 {
   "id": "chrome-cache",
-  "patterns": ["/google/chrome/user data/default/cache", "/.cache/google-chrome"],
+  "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**"],
   "category": "browser_cache",
   "verdict": "safe",
   "description": "Chrome browser cache. Fully regenerated on next use."
@@ -20,7 +20,7 @@ time from [`crates/diskern-core/rules/base.json`](../crates/diskern-core/rules/b
 | Field         | Meaning                                                              |
 | ------------- | -------------------------------------------------------------------- |
 | `id`          | Stable, kebab-case, unique. Shown to users as evidence.              |
-| `patterns`    | Substrings matched against the normalized path (lowercased, `/`-separated). |
+| `patterns`    | Globs matched against the normalized path (lowercased, `/`-separated). |
 | `category`    | What the file *is* — `browser_cache`, `build_artifact`, `log`, …     |
 | `verdict`     | Base safety verdict (see below).                                     |
 | `description` | Plain-language explanation shown to the user.                        |
@@ -42,19 +42,34 @@ evidence (e.g. recently-accessed files), never less.
 - **First match wins** — order in the file is priority order, which is
   why `protected` rules are listed first.
 - Paths that match no rule get `unknown` / `review` — never `safe`.
-- Patterns are plain substrings matched anywhere in the path, so a rule
-  cannot say "this extension, but only under Downloads". Where that
-  matters, write the half that is safe on its own (the extension) and
-  keep the verdict at `review`. Proper glob matching is
-  [issue #41](https://github.com/Coding-Moves/diskern/issues/41).
+- Patterns are globs, matched against the whole normalized path:
+  - `*` matches within one path component and stops at `/`
+  - `**` spans components
+  - a pattern that starts with `/` is anchored at the filesystem root
 
-Because matches can land anywhere in a path, **rule order is a safety
-property**. `installer-packages` matches `.msi` anywhere — including
-`C:\Windows\Installer`, the cache Windows needs to uninstall, repair or
-patch installed software, and the `Package Cache` folders that serve the
-same purpose for .NET and Visual Studio. `review` is an *actionable*
-verdict in the app, so without `windows-installer-cache` listed above
-`installer-packages`, the UI would offer to quarantine them.
+That anchoring is what keeps a rule inside the directory it names.
+`/tmp/**` is the root's scratch directory; it does not reach
+`/home/user/tmp/tax-return.pdf`. `**/node_modules/**` still matches at
+any depth, because that is what the rule means.
+
+Write patterns to end in `/**` when the rule is about a directory, and
+as `**/*.ext` when it is about an extension. A directory pattern without
+the trailing `/**` matches the directory entry itself — and the scanner
+only ever classifies files, so it would match nothing.
+
+A pattern that isn't a valid glob is dropped with a warning rather than
+taken down the scan, so **a typo makes a rule match nothing**. For a
+`protected` rule that fails open, which is why
+`every_shipped_pattern_is_a_valid_glob` in
+[`rules.rs`](../crates/diskern-core/src/rules.rs) exists.
+
+**Rule order is a safety property.** `installer-packages` matches
+`**/*.msi` anywhere on the disk — including `C:\Windows\Installer`, the
+cache Windows needs to uninstall, repair or patch installed software, and
+the `Package Cache` folders that serve the same purpose for .NET and
+Visual Studio. `review` is an *actionable* verdict in the app, so without
+`windows-installer-cache` listed above `installer-packages`, the UI would
+offer to quarantine them.
 
 When adding a broad rule:
 
@@ -75,7 +90,7 @@ rules PRs are very welcome. Guidelines:
 
 1. Be conservative: when in doubt, use `review`, not `safe`.
 2. Patterns should be specific enough not to match user data
-   (e.g. `/target/debug`, not `/target`).
+   (e.g. `**/target/debug/**`, not `**/target/**`).
 3. Write the `description` for end users: what it is, why it's safe (or
    not), what happens after removal.
 4. Add a test in [`rules.rs`](../crates/diskern-core/src/rules.rs) if the

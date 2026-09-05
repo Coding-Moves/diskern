@@ -26,11 +26,11 @@ scanner ──► index ──► dedup ──► graph ──► rules + risk �
 | ---------------------------- | ------------------------------------------------------ |
 | [`scanner`](src/scanner.rs)  | Parallel filesystem walk (jwalk) with live progress    |
 | [`dedup`](src/dedup.rs)      | Duplicate detection — BLAKE3, size-collision gated     |
-| [`graph`](src/graph.rs)      | Reference graph (what depends on what)                 |
+| [`graph`](src/graph.rs)      | Reference graph — which projects depend on which stores |
 | [`rules`](src/rules.rs)      | Deterministic rules DB ([`rules/base.json`](rules/base.json)) |
 | [`risk`](src/risk.rs)        | Turns rule matches + evidence into a verdict           |
 | [`report`](src/report.rs)    | Aggregates findings into a serializable report         |
-| [`actions`](src/actions.rs)  | Quarantine (move-to-review-folder) — the only mutator  |
+| [`actions`](src/actions.rs)  | Quarantine + manifest (move, restore, purge) — the only mutator |
 | [`ai`](src/ai.rs)            | Optional narration layer (`--features ai`)             |
 
 ## Develop
