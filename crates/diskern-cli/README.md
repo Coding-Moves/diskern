@@ -21,8 +21,9 @@ diskern scan ~/Downloads --json
 ### Output
 
 Findings are grouped by verdict (safest first), then by category within
-each verdict, with the rule that matched printed underneath as the
-evidence:
+each verdict, with every reason printed underneath as the evidence — the
+rule that matched, and anything that changed the verdict from the rule's
+own:
 
 ```text
 Scanned 84,213 files.
@@ -32,8 +33,20 @@ Safe to remove — 802 findings · 6.1 GB
   Browser cache · 641 · 4.8 GB
       412.0 MB  /home/u/.cache/google-chrome/Default/Cache/data_2
                 matched rule chrome-cache: Chrome browser cache. …
+                not accessed in 210 days
       …     …  … 636 more
+
+Risky — not recommended — 3 findings · 0 B
+  Build artifacts · 3 · 0 B
+           0 B  /home/u/work/api/node_modules/.package-lock.json
+                matched rule node-modules: Node.js dependencies. …
+                referenced by 3 projects
 ```
+
+`referenced by 3 projects` is the impact graph: three live projects have
+that `node_modules` on their dependency path, so the verdict drops from
+`review` to `risky` and its bytes stop counting as reclaimable —
+nothing will offer to move it.
 
 | Flag        | Default | Effect                                                  |
 | ----------- | ------- | ------------------------------------------------------- |

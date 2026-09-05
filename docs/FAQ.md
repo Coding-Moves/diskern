@@ -2,8 +2,10 @@
 
 **Can Diskern delete my files?**
 Not directly. Scanning is read-only, and cleanup actions only move files
-to a quarantine folder you can review and restore from. Emptying
-quarantine is a separate, explicit step.
+to a quarantine folder you can review and restore from. Every move is
+recorded in a manifest inside that folder, so what you quarantined today
+is still restorable after a restart. Emptying quarantine is a separate,
+explicit step, and it removes only the files the manifest lists.
 
 **Does it send my data anywhere?**
 No. Scanning, classification, and risk scoring are fully local. The
@@ -25,5 +27,7 @@ Same engine either way. The CLI (`diskern scan <dir>`) suits scripting
 and remote machines; the app adds visual review and quarantine handling.
 
 **Which platforms are supported?**
-The engine and CLI build anywhere Rust does. The desktop app targets
-Windows, macOS, and Linux via Tauri v2.
+The engine and CLI build anywhere Rust does, and their test suite runs on
+Linux, Windows and macOS. The desktop app is built and released for
+Linux and Windows; macOS builds from source and is tested in CI, but no
+signed macOS release ships yet.

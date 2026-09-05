@@ -15,10 +15,16 @@ and tests alike.
 ## Pipeline
 
 ```text
-scanner ──► index ──► dedup ──► graph ──► rules + risk ──► report
-                                                  │
-                                       (optional) ai narration
+scanner ──► graph ──► rules + risk ──► dedup ──► report
+                                                   │
+                                        (optional) ai narration
 ```
+
+Dedup runs *after* classification: a duplicate set is an offer to keep
+one copy and drop the rest, so entries nothing will act on have no place
+in one — and hashing them is the most expensive way to produce a number
+nobody can use. [`report::build_with`](src/report.rs) is the whole
+sequence in one function.
 
 ## Modules
 
