@@ -167,9 +167,12 @@ fn print_findings(findings: &[&Finding], top: usize) {
                     human_bytes(f.reclaimable),
                     f.entry.path.display()
                 );
-                // The first reason is the matched rule; the rest come from
-                // the risk module and repeat across a whole category.
-                if let Some(reason) = f.reasons.first() {
+                // Every reason, not just the matched rule. The rule says
+                // what the file is; the rest say why this copy of it got
+                // the verdict it did — "referenced by 3 projects" is the
+                // line that explains a risky node_modules, and printing
+                // only the first hid exactly that.
+                for reason in &f.reasons {
                     println!("    {:>9}  {reason}", "");
                 }
             }
