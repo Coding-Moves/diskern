@@ -64,7 +64,7 @@ pub fn build_with(
 
     let duplicate_sets = dedup::find_duplicates_filtered(
         &mut entries,
-        |e| e.size >= opts.dedup_min_size,
+        |_, e| e.size >= opts.dedup_min_size,
         cancelled,
     )?;
     let files_scanned = entries.len() as u64;

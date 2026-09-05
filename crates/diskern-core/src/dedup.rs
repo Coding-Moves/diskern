@@ -37,7 +37,7 @@ pub fn find_duplicates_cancellable(
     entries: &mut [FileEntry],
     cancelled: &AtomicBool,
 ) -> Option<Vec<DuplicateSet>> {
-    find_duplicates_filtered(entries, |_| true, cancelled)
+    find_duplicates_filtered(entries, |_, _| true, cancelled)
 }
 
 /// [`find_duplicates_cancellable`], restricted to the entries `eligible`
@@ -48,15 +48,24 @@ pub fn find_duplicates_cancellable(
 /// that offer, and hashing it is work spent to produce a number nobody can
 /// use. `eligible` is where the caller says which entries those are; it is
 /// called exactly once per entry, before any hashing.
+///
+/// The index comes along because the interesting callers have already
+/// worked something out per entry — `report` classifies first — and
+/// looking that answer up by position beats re-deriving it or keeping a
+/// set of paths the size of the disk.
 pub fn find_duplicates_filtered<F>(
     entries: &mut [FileEntry],
     eligible: F,
     cancelled: &AtomicBool,
 ) -> Option<Vec<DuplicateSet>>
 where
-    F: Fn(&FileEntry) -> bool,
+    F: Fn(usize, &FileEntry) -> bool,
 {
-    let keep: Vec<bool> = entries.iter().map(eligible).collect();
+    let keep: Vec<bool> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| eligible(i, e))
+        .collect();
 
     // Stage 1: bucket by size.
     let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -168,7 +177,7 @@ mod tests {
         let never = AtomicBool::new(false);
         let sets = find_duplicates_filtered(
             &mut entries,
-            |e| e.path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("keep")),
+            |_, e| e.path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("keep")),
             &never,
         )
         .unwrap();
