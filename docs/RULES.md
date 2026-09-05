@@ -10,7 +10,7 @@ time from [`crates/diskern-core/rules/base.json`](../crates/diskern-core/rules/b
 ```json
 {
   "id": "chrome-cache",
-  "patterns": ["/google/chrome/user data/default/cache", "/.cache/google-chrome"],
+  "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**"],
   "category": "browser_cache",
   "verdict": "safe",
   "description": "Chrome browser cache. Fully regenerated on next use."
