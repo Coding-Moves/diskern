@@ -31,10 +31,10 @@
     },
     {
       "id": "firefox-cache",
-      "patterns": ["**/.cache/mozilla/firefox/**", "**/mozilla/firefox/profiles/**"],
+      "patterns": ["**/.cache/mozilla/firefox/**", "**/mozilla/firefox/profiles/*/cache2/**", "**/library/caches/firefox/profiles/*/cache2/**"],
       "category": "browser_cache",
       "verdict": "safe",
-      "description": "Firefox cache. Regenerated automatically."
+      "description": "Firefox network cache (cache2). Regenerated automatically. The rest of the profile — bookmarks, history, logins, cookies — is deliberately not covered."
     },
     {
       "id": "rust-target",

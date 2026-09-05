@@ -259,6 +259,39 @@ mod tests {
         }
     }
 
+    /// Issue #40. `/mozilla/firefox/profiles` covered the whole profile
+    /// directory, so bookmarks, history, logins and cookies were listed
+    /// under "Safe to remove" and `quarantine_finding` accepted them.
+    /// Only cache2 is cache; everything else in the profile is user data.
+    #[test]
+    fn firefox_profile_data_is_not_safe_to_remove() {
+        let db = RulesDb::embedded();
+        for path in [
+            "C:\\Users\\x\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\ab12.default\\logins.json",
+            "C:\\Users\\x\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\ab12.default\\places.sqlite",
+            "C:\\Users\\x\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\ab12.default\\cookies.sqlite",
+            "/home/u/.mozilla/firefox/ab12.default/key4.db",
+        ] {
+            let (_, verdict, rule) = db.classify(std::path::Path::new(path));
+            assert_ne!(verdict, Verdict::Safe, "{path} matched {rule:?}");
+        }
+    }
+
+    /// The cache the rule is actually named after still classifies.
+    #[test]
+    fn firefox_cache_is_still_safe_to_remove() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/home/u/.cache/mozilla/firefox/ab12.default/cache2/entries/A1B2",
+            "C:\\Users\\x\\AppData\\Local\\Mozilla\\Firefox\\Profiles\\ab12.default\\cache2\\entries\\A1B2",
+            "/Users/x/Library/Caches/Firefox/Profiles/ab12.default/cache2/entries/A1B2",
+        ] {
+            let (cat, verdict, _) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::BrowserCache, "{path}");
+            assert_eq!(verdict, Verdict::Safe, "{path}");
+        }
+    }
+
     /// An installed application's own repair binary is not a reclaimable
     /// download. `unknown` is the right answer: report::build drops those,
     /// so it never reaches the user as an actionable row.
