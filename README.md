@@ -31,8 +31,9 @@ site/                 landing page (GitHub Pages)
 docs/                 architecture and release docs
 ```
 
-Project docs live in [docs/](docs/README.md) — architecture, the
-[rules database](docs/RULES.md), an [FAQ](docs/FAQ.md), and release
+Project docs live in [docs/](docs/README.md) — [running
+locally](docs/DEVELOPMENT.md), architecture, the [rules
+database](docs/RULES.md), an [FAQ](docs/FAQ.md), and release
 instructions. Each section has its own README:
 [core](crates/diskern-core/README.md) ·
 [cli](crates/diskern-cli/README.md) ·
@@ -42,13 +43,17 @@ instructions. Each section has its own README:
 ## Development
 
 ```sh
-# Engine + CLI (no GUI deps needed)
-cargo test -p diskern-core
+# Engine + CLI — no GUI dependencies needed
+cargo test -p diskern-core -p diskern-cli
 cargo run -p diskern-cli -- scan ~/Downloads
 
-# Desktop app (needs Tauri v2 prerequisites: https://v2.tauri.app/start/prerequisites/)
+# Desktop app
 cd app && npm install && npm run tauri dev
 ```
+
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the full setup: what to
+install per platform, how to run what CI runs, and what the build
+failures mean.
 
 ## Releasing
 
