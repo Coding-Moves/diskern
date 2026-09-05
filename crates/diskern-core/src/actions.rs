@@ -428,7 +428,12 @@ mod tests {
 
         let manifest = manifest_path(&q);
         let good = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(&manifest, format!("{{\"original\": tru\n{good}")).unwrap();
+        // A line cut off mid-value, the way an interrupted append leaves it.
+        std::fs::write(
+            &manifest,
+            format!("{{\"original\": \"/home/u/half-writ\n{good}"),
+        )
+        .unwrap();
 
         assert_eq!(list(&q).unwrap().len(), 1);
     }
