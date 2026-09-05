@@ -39,11 +39,7 @@ pub fn quarantine(
     let flat = file.to_string_lossy().replace(['/', '\\', ':'], "_");
     let dest = quarantine_dir.join(format!("{stamp}_{flat}"));
 
-    // rename() fails across filesystems; fall back to copy+remove.
-    if std::fs::rename(file, &dest).is_err() {
-        std::fs::copy(file, &dest).map_err(|e| io_err(file, e))?;
-        std::fs::remove_file(file).map_err(|e| io_err(file, e))?;
-    }
+    move_file(file, &dest)?;
 
     Ok(QuarantineRecord {
         original: file.to_path_buf(),
@@ -57,8 +53,36 @@ pub fn restore(record: &QuarantineRecord) -> Result<()> {
     if let Some(parent) = record.original.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
     }
-    std::fs::rename(&record.quarantined_to, &record.original)
-        .map_err(|e| io_err(&record.quarantined_to, e))
+    move_file(&record.quarantined_to, &record.original)
+}
+
+/// Move a file, in the one direction this crate is allowed to move things.
+///
+/// `rename` is the fast path and fails with `EXDEV` when the two paths are
+/// on different filesystems — which is the normal case here, not an edge
+/// one: quarantine lives in the app's local data directory, and the files
+/// being quarantined come from wherever the user pointed the scan, which
+/// may well be a second drive or a `/home` on its own partition.
+///
+/// Both directions go through this. The quarantine path used to handle the
+/// fallback and the restore path didn't, so the exact case the move
+/// survived was the case the undo failed on.
+fn move_file(from: &Path, to: &Path) -> Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    copy_then_remove(from, to)
+}
+
+/// The fallback half of [`move_file`], separated so it can be tested
+/// without two filesystems to hand.
+///
+/// The remove comes last on purpose: if it fails, the file still exists in
+/// both places, which is recoverable. Removing first and failing to copy
+/// would not be.
+fn copy_then_remove(from: &Path, to: &Path) -> Result<()> {
+    std::fs::copy(from, to).map_err(|e| io_err(from, e))?;
+    std::fs::remove_file(from).map_err(|e| io_err(from, e))
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> GenomeError {
@@ -92,6 +116,39 @@ mod tests {
 
         restore(&rec).unwrap();
         assert!(f.exists());
+    }
+
+    /// Issue #42. `quarantine` handled the cross-filesystem case and
+    /// `restore` didn't, so quarantining a file from another mount worked
+    /// and undoing it returned EXDEV. Provoking a real EXDEV needs two
+    /// mounts, so this exercises the fallback both directions now share.
+    #[test]
+    fn the_cross_filesystem_fallback_moves_the_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("from.txt");
+        let to = dir.path().join("to.txt");
+        std::fs::write(&from, b"data").unwrap();
+
+        copy_then_remove(&from, &to).unwrap();
+
+        assert!(!from.exists());
+        assert_eq!(std::fs::read(&to).unwrap(), b"data");
+    }
+
+    #[test]
+    fn restore_recreates_a_directory_that_was_removed_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let nested = dir.path().join("a/b");
+        std::fs::create_dir_all(&nested).unwrap();
+        let f = nested.join("victim.txt");
+        std::fs::write(&f, b"data").unwrap();
+
+        let rec = quarantine(&f, Verdict::Safe, &q).unwrap();
+        std::fs::remove_dir_all(dir.path().join("a")).unwrap();
+
+        restore(&rec).unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"data");
     }
 
     #[test]
