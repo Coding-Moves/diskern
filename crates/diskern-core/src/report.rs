@@ -69,10 +69,10 @@ pub fn build_with(
     // from an abandoned one.
     let impact = graph::ImpactGraph::from_entries_cancellable(&entries, cancelled)?;
 
-    // Classify before dedup, not after. A protected file has no business
-    // in a duplicate set — the set is an offer to keep one copy and drop
-    // the rest, and dropping a driver store copy is not on offer — and
-    // hashing it is time spent producing a number nobody can act on.
+    // Classify before dedup, not after. A file nothing will act on has no
+    // business in a duplicate set — the set is an offer to keep one copy
+    // and drop the rest, and dropping a driver store copy is not on offer
+    // — and hashing it is time spent producing a number nobody can use.
     //
     // Classification is cheap per entry, but a home directory is millions
     // of them, so it happens once and the answer is kept.
@@ -95,7 +95,7 @@ pub fn build_with(
 
     let duplicate_sets = dedup::find_duplicates_filtered(
         &mut entries,
-        |i, e| e.size >= opts.dedup_min_size && verdicts[i].verdict != Verdict::Protected,
+        |i, e| e.size >= opts.dedup_min_size && is_actionable(verdicts[i].verdict),
         cancelled,
     )?;
     let files_scanned = entries.len() as u64;
@@ -127,12 +127,10 @@ pub fn build_with(
 
         findings.push(Finding {
             // Bytes nothing will ever offer to move are not reclaimable.
-            // `actions::quarantine` refuses Risky as well as Protected, and
-            // the UI renders neither with an action, so counting either
-            // towards the headline promises space the app won't free.
-            reclaimable: match class.verdict {
-                Verdict::Protected | Verdict::Risky => 0,
-                Verdict::Safe | Verdict::Review => entry.size,
+            reclaimable: if is_actionable(class.verdict) {
+                entry.size
+            } else {
+                0
             },
             entry,
             category: class.category,
@@ -152,6 +150,20 @@ pub fn build_with(
         total_reclaimable,
         files_scanned,
     })
+}
+
+/// Whether anything will ever offer to move this file.
+///
+/// `actions::quarantine` refuses Protected and Risky, and the UI renders
+/// no action for either. One definition, used in both places it matters:
+/// what counts towards the reclaimable headline, and what takes part in
+/// dedup. Splitting them let Risky bytes back into the total through the
+/// duplicate half after they had been taken out of the findings half.
+fn is_actionable(verdict: Verdict) -> bool {
+    match verdict {
+        Verdict::Safe | Verdict::Review => true,
+        Verdict::Risky | Verdict::Protected => false,
+    }
 }
 
 /// What the pipeline worked out about one entry before findings are built.
@@ -346,8 +358,8 @@ mod tests {
     }
 
     /// The other half of #44: `find_duplicates` ran over every entry,
-    /// including protected ones, so system files contributed `wasted`
-    /// bytes to a total the user is never allowed to act on.
+    /// including ones nothing will act on, so their bytes contributed
+    /// `wasted` to a total the user can never do anything with.
     #[test]
     fn protected_files_form_no_duplicate_sets() {
         let dir = tempfile::tempdir().unwrap();
@@ -453,5 +465,66 @@ mod tests {
             &cancelled,
         )
         .is_none());
+    }
+
+    /// Risky bytes were taken out of the findings half of the headline and
+    /// then walked back in through the duplicate half: `total_reclaimable`
+    /// treats a zero-reclaimable finding as "nobody counted this yet", so
+    /// a duplicate set of Risky copies added its full `wasted`.
+    #[test]
+    fn risky_duplicates_do_not_return_to_the_headline() {
+        let dir = tempfile::tempdir().unwrap();
+        for project in ["live1", "live2"] {
+            let root = dir.path().join(project);
+            std::fs::create_dir_all(root.join("node_modules/react")).unwrap();
+            std::fs::write(root.join("package.json"), b"{}").unwrap();
+            std::fs::write(root.join("node_modules/react/index.js"), b"identical").unwrap();
+        }
+
+        let rules = RulesDb::new(
+            1,
+            vec![crate::rules::Rule {
+                id: "test-node-modules".into(),
+                patterns: vec!["**/node_modules/**".into()],
+                category: Category::BuildArtifact,
+                verdict: Verdict::Review,
+                description: "test".into(),
+            }],
+        );
+
+        let never = AtomicBool::new(false);
+        let report = build_with(
+            scan_dir(dir.path()),
+            &rules,
+            &ReportOptions::default(),
+            &never,
+        )
+        .unwrap();
+
+        let risky: Vec<&Finding> = report
+            .findings
+            .iter()
+            .filter(|f| f.verdict == Verdict::Risky)
+            .collect();
+        assert_eq!(risky.len(), 2, "both node_modules copies are referenced");
+        assert!(risky.iter().all(|f| f.reclaimable == 0));
+
+        // Nothing the app refuses to act on may reach a duplicate set...
+        for set in &report.duplicate_sets {
+            for path in &set.paths {
+                assert!(
+                    !path.to_string_lossy().contains("node_modules"),
+                    "{} is risky and should not be offered as a duplicate",
+                    path.display()
+                );
+            }
+        }
+        // ...so the headline is the one duplicate pair the user really
+        // can act on — the two identical `package.json` files, which are
+        // unclassified and so not findings, but are still two copies of
+        // the same two bytes. Before the fix the risky pair added its own
+        // 9 bytes on top, promising space the app refuses to free.
+        assert_eq!(report.duplicate_sets.len(), 1);
+        assert_eq!(report.total_reclaimable, 2);
     }
 }
