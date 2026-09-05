@@ -566,12 +566,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let q = dir.path().join("quarantine");
         // Raw bytes no UTF-8 decoder accepts, in an otherwise ordinary
-        // name: a legal filename on this platform, and one a scan of a
-        // real disk turns up in downloads unpacked from old archives.
+        // name: a legal filename on Linux, and one a scan of a real disk
+        // turns up in downloads unpacked from old archives.
         let victim = dir
             .path()
             .join(std::ffi::OsStr::from_bytes(b"photo-\xff\xfe.dmg"));
-        std::fs::write(&victim, b"payload").unwrap();
+
+        // `EILSEQ` on macOS: the errno APFS answers a filename that is
+        // not valid UTF-8 with.
+        const MACOS_EILSEQ: i32 = 92;
+
+        match std::fs::write(&victim, b"payload") {
+            Ok(()) => {}
+            // macOS validates filenames as UTF-8 in the filesystem itself,
+            // so a name like this cannot exist there and the loss it
+            // caused is not reachable. Linux imposes no such rule, which
+            // is why this is checked rather than skipped by a `cfg`: if
+            // the fixture ever stops being creatable, that is a failure
+            // and not a quiet pass. Only the one refusal that means
+            // "this platform forbids the name" is allowed through.
+            Err(e) if cfg!(target_os = "macos") && e.raw_os_error() == Some(MACOS_EILSEQ) => return,
+            Err(e) => panic!("could not create the fixture: {e}"),
+        }
 
         let err = quarantine(&victim, Verdict::Review, &q).unwrap_err();
         assert!(
@@ -685,5 +701,59 @@ mod tests {
         assert_eq!(summary.files_removed, 0);
         assert_eq!(summary.bytes_removed, 0);
         assert!(summary.failed.is_empty());
+    }
+
+    /// Quarantine names are built from the original path, and on Windows
+    /// that path opens `C:\` — a colon and backslashes, none of which are
+    /// legal in a filename. Nothing may survive the flattening.
+    #[test]
+    fn a_quarantine_name_carries_no_separator_from_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let nested = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        let victim = nested.join("victim.txt");
+        std::fs::write(&victim, b"data").unwrap();
+
+        let record = quarantine(&victim, Verdict::Safe, &q).unwrap();
+        let name = record
+            .quarantined_to
+            .file_name()
+            .expect("a quarantined file has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        for separator in ['/', '\\', ':'] {
+            assert!(
+                !name.contains(separator),
+                "{name} still carries {separator:?}"
+            );
+        }
+        assert!(record.quarantined_to.exists());
+        assert_eq!(list(&q).unwrap().len(), 1);
+    }
+
+    /// The Windows half of `a_path_that_cannot_be_recorded_is_not_moved`.
+    ///
+    /// Windows filenames are UTF-16 and may hold an unpaired surrogate,
+    /// which serde rejects exactly as it rejects invalid UTF-8 on Unix —
+    /// so the same data loss was reachable here. Creating such a file
+    /// through the Win32 API is not dependable, so this pins the guard
+    /// that stops the move rather than the whole flow.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_that_cannot_be_recorded_is_refused() {
+        use std::os::windows::ffi::OsStringExt;
+
+        // "a\u{D800}.dat" — a lone high surrogate in an ordinary name.
+        let name = std::ffi::OsString::from_wide(&[0x0061, 0xD800, 0x002E, 0x0064, 0x0061, 0x0074]);
+        let record = QuarantineRecord {
+            original: PathBuf::from(name),
+            quarantined_to: PathBuf::from("quarantine"),
+            at_epoch: 0,
+        };
+
+        let err = encode(&record).unwrap_err();
+        assert!(err.to_string().contains("will not be moved"), "{err}");
     }
 }

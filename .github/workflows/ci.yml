@@ -34,7 +34,9 @@ jobs:
               - 'Cargo.lock'
               - '.github/workflows/ci.yml'
 
-  test:
+  # Formatting and lints answer the same on every platform, so they run
+  # once rather than three times.
+  lint:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -42,10 +44,35 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2
-      # Core + CLI only: building the Tauri crate needs webkitgtk, which CI
-      # for library tests doesn't need. The release workflow covers the app.
+      # Core + CLI only: building the Tauri crate needs webkitgtk, which
+      # lints of the library don't need. `app-tauri` below covers the shell.
+      #
+      # --all-targets so tests are linted too. `cargo test` compiles test
+      # code but applies no lints to it, so without this the suite — by now
+      # a good half of the crate — drifts unlinted while CI stays green.
       - run: cargo fmt --check
-      - run: cargo clippy -p diskern-core -p diskern-cli -- -D warnings
+      - run: cargo clippy -p diskern-core -p diskern-cli --all-targets -- -D warnings
+
+  # The engine's behaviour is platform-specific in ways a run on one OS
+  # cannot reach, and it ships on more than one: `default_excludes` has a
+  # `cfg` arm per platform, most of the rules database describes Windows
+  # and macOS paths, and quarantine flattens drive letters and separators
+  # that only exist on Windows. Until this matrix, all of that was checked
+  # against string literals on Linux and executed on Windows for the first
+  # time in the release build — after the tag was pushed.
+  #
+  # fail-fast off: when a change breaks two platforms, seeing one of them
+  # is half a bug report.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
       - run: cargo test -p diskern-core -p diskern-cli
 
   # Type-checks app/src-tauri against the current diskern-core. Until this
@@ -56,16 +83,34 @@ jobs:
   # clippy, not a full `cargo build` — the goal is catching signature drift
   # and lint regressions in the shell; the release workflow still owns
   # producing an actual bundle.
+  #
+  # Every platform the shell is built for, because the shells differ:
+  # Linux links webkitgtk and the GTK3 stack, Windows links WebView2,
+  # macOS links WKWebView, and a `cfg`-shaped mistake compiles fine on one
+  # and not another. Windows used to be compiled for the first time during
+  # the release build.
+  #
+  # macOS is here even though its release entry is still commented out.
+  # Leaving it off would hand whoever re-enables that entry the exact
+  # failure this job exists to prevent — a first compile after the tag is
+  # pushed. It costs a few minutes on PRs that touch `crates/` or `app/`,
+  # and nothing on any other PR: `changes` gates the whole job.
   app-tauri:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
       # Same apt line as release.yml. Kept in sync by hand; there is no
-      # cheaper way to share it between workflows.
+      # cheaper way to share it between workflows. Windows needs none of
+      # this — WebView2 ships with the OS.
       - name: Linux system deps (Tauri v2 / webkitgtk 4.1)
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
