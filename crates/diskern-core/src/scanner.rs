@@ -19,7 +19,6 @@ pub struct ScanOptions {
     /// so case and separator style don't have to line up with the root.
     pub excludes: Vec<String>,
     pub follow_symlinks: bool, // default false — symlink loops are real
-    pub min_file_size: u64,    // skip tiny files for dedup purposes
 }
 
 impl Default for ScanOptions {
@@ -28,7 +27,6 @@ impl Default for ScanOptions {
             roots: vec![],
             excludes: default_excludes(),
             follow_symlinks: false,
-            min_file_size: 1,
         }
     }
 }
@@ -107,9 +105,6 @@ fn walk_root(
         }
         let Ok(meta) = entry.metadata() else { continue };
         let size = meta.len();
-        if size < opts.min_file_size {
-            continue;
-        }
 
         progress.files_seen.fetch_add(1, Ordering::Relaxed);
         progress.bytes_seen.fetch_add(size, Ordering::Relaxed);
