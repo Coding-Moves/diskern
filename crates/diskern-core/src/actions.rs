@@ -18,6 +18,7 @@ use crate::{GenomeError, Result, Verdict};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 /// Quarantine's record of itself, inside the quarantine directory.
 pub const MANIFEST_NAME: &str = "manifest.jsonl";
@@ -27,6 +28,35 @@ pub const MANIFEST_NAME: &str = "manifest.jsonl";
 /// past that easily; the tail is kept because that is the half that
 /// distinguishes two files.
 const MAX_FLAT_LEN: usize = 180;
+
+/// Serializes every manifest access in this process.
+///
+/// `restore_from_manifest` and `purge` are read-modify-write: they read
+/// the whole manifest and later rewrite it from what they read. A record
+/// appended in between was erased by that rewrite, leaving the file in
+/// quarantine with nothing recording where it belongs — invisible to
+/// `list`, unrestorable, and not even removed by a later `purge`.
+///
+/// The app makes that reachable: `quarantine_finding`, `restore_quarantined`
+/// and `purge_quarantine` each run on their own blocking task, and nothing
+/// in the UI stops a user quarantining one row while another row's restore
+/// is still in flight.
+///
+/// One lock for the process rather than one per directory: these
+/// operations are rare, short, and a second quarantine directory in one
+/// process isn't a thing that happens.
+static MANIFEST: Mutex<()> = Mutex::new(());
+
+/// A poisoned lock means an earlier holder panicked mid-operation. The
+/// manifest on disk is either the old one or the new one — `write_manifest`
+/// renames a complete file into place — so there is no torn state to
+/// protect, and refusing to unlock would break quarantine for the rest of
+/// the session.
+fn manifest_lock() -> MutexGuard<'static, ()> {
+    MANIFEST
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuarantineRecord {
@@ -73,6 +103,7 @@ pub fn quarantine(
 
     // The move happened; the record must follow it or the move must not
     // stand. Anything else strands the file.
+    let _guard = manifest_lock();
     if let Err(e) = append_line(quarantine_dir, &line) {
         // Best effort, and the only sensible order: the original was
         // sitting here a moment ago, so putting it back is the outcome
@@ -148,6 +179,13 @@ pub fn restore(record: &QuarantineRecord) -> Result<()> {
 /// A quarantine directory with no manifest is empty, not broken: the app
 /// resolves the path before anything has been quarantined into it.
 pub fn list(quarantine_dir: &Path) -> Result<Vec<QuarantineRecord>> {
+    let _guard = manifest_lock();
+    read_manifest(quarantine_dir)
+}
+
+/// [`list`] without taking the lock — for callers that already hold it.
+/// `Mutex` is not reentrant, so they must not go through `list`.
+fn read_manifest(quarantine_dir: &Path) -> Result<Vec<QuarantineRecord>> {
     let path = manifest_path(quarantine_dir);
     let contents = match std::fs::read_to_string(&path) {
         Ok(c) => c,
@@ -179,7 +217,10 @@ pub fn restore_from_manifest(
     quarantine_dir: &Path,
     quarantined_to: &Path,
 ) -> Result<QuarantineRecord> {
-    let records = list(quarantine_dir)?;
+    // Held across the read, the move and the rewrite: anything appended
+    // between the read and the rewrite would be erased by it.
+    let _guard = manifest_lock();
+    let records = read_manifest(quarantine_dir)?;
     let record = records
         .iter()
         .find(|r| r.quarantined_to == quarantined_to)
@@ -219,7 +260,8 @@ pub struct PurgeSummary {
 /// it deletes only the files the manifest says this crate moved here —
 /// never whatever else happens to be sitting in the directory.
 pub fn purge(quarantine_dir: &Path) -> Result<PurgeSummary> {
-    let records = list(quarantine_dir)?;
+    let _guard = manifest_lock();
+    let records = read_manifest(quarantine_dir)?;
     let mut summary = PurgeSummary::default();
     let mut kept = Vec::new();
 
@@ -561,5 +603,68 @@ mod tests {
         std::fs::remove_file(&original).unwrap();
         restore(&rec).unwrap();
         assert_eq!(std::fs::read(&original).unwrap(), b"old-copy");
+    }
+
+    /// Nothing may end up in the quarantine directory without a manifest
+    /// line naming it.
+    ///
+    /// `restore_from_manifest` and `purge` rewrite the manifest from what
+    /// they read, so a record appended in between used to be erased —
+    /// stranding a file that `list` could not see, `restore` could not
+    /// reach and `purge` would not remove. Two threads quarantining while
+    /// a third restores reproduces it without the lock.
+    #[test]
+    fn concurrent_quarantines_and_restores_strand_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let victims: Vec<PathBuf> = (0..40)
+            .map(|i| {
+                let f = dir.path().join(format!("victim-{i}.dat"));
+                std::fs::write(&f, format!("{i}")).unwrap();
+                f
+            })
+            .collect();
+
+        std::thread::scope(|scope| {
+            for chunk in victims.chunks(20) {
+                let q = &q;
+                scope.spawn(move || {
+                    for victim in chunk {
+                        quarantine(victim, Verdict::Safe, q).unwrap();
+                    }
+                });
+            }
+            // Restores racing the appends, on whatever is listed so far.
+            scope.spawn(|| {
+                for _ in 0..40 {
+                    if let Some(record) = list(&q).unwrap().first() {
+                        // Losing the race with another restore is fine;
+                        // stranding a file is not.
+                        let _ = restore_from_manifest(&q, &record.quarantined_to);
+                    }
+                }
+            });
+        });
+
+        let listed: std::collections::HashSet<PathBuf> = list(&q)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.quarantined_to)
+            .collect();
+        let on_disk: Vec<PathBuf> = std::fs::read_dir(&q)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.file_name().is_some_and(|n| n != MANIFEST_NAME))
+            .collect();
+
+        for path in &on_disk {
+            assert!(
+                listed.contains(path),
+                "{} is in quarantine with no manifest record",
+                path.display()
+            );
+        }
+        assert_eq!(listed.len(), on_disk.len());
     }
 }
