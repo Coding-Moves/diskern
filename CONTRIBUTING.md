@@ -32,10 +32,12 @@ Two consequences worth stating plainly, because they come up:
 
 **Rules for the safety database.** This is the most useful thing you can
 do and the easiest to start on. Diskern only knows what its rules tell
-it, and the shipped set is deliberately tiny — it covers Chrome,
-Firefox, pip, Rust and Node build output, and a handful of system
-directories. Everything else on your disk classifies as `unknown` and is
-dropped from the report.
+it, and the shipped set is deliberately tiny — thirteen rules covering
+Chrome, Firefox and pip caches, Rust and Node build output, system logs
+and crash dumps, installer packages, temp directories, and a few
+protected Windows paths. Everything else on your disk classifies as
+`unknown`, and `report::build` drops those, so it never reaches the user
+at all.
 
 If you know where an application on your platform keeps its regenerable
 cache, that is a rule nobody else can write as well as you. Format,
