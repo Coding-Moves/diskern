@@ -13,6 +13,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A file whose presence makes the directory holding it a project root,
 /// and the stores a project of that kind owns.
@@ -75,6 +76,19 @@ impl ImpactGraph {
     /// reference it — and it is where the "referenced by 3 projects"
     /// number comes from rather than always being 1.
     pub fn from_entries(entries: &[FileEntry]) -> Self {
+        static NEVER: AtomicBool = AtomicBool::new(false);
+        Self::from_entries_cancellable(entries, &NEVER)
+            .expect("a run that cannot be cancelled cannot stop early")
+    }
+
+    /// [`from_entries`], abandoned as soon as `cancelled` is set.
+    ///
+    /// This walks every entry's ancestors, which is a second or so per
+    /// million entries — long enough that a Cancel arriving during it
+    /// would otherwise do nothing until the stage after it started. The
+    /// walk and the hashing pass both stop promptly; this has to as well,
+    /// or it just moves the dead spot.
+    pub fn from_entries_cancellable(entries: &[FileEntry], cancelled: &AtomicBool) -> Option<Self> {
         // A set of kinds per root, not one: a directory holding both a
         // `Cargo.toml` and a `package.json` is both projects, and it is a
         // shape that turns up constantly — any Rust binary with a web
@@ -90,6 +104,9 @@ impl ImpactGraph {
         let mut stores: HashSet<PathBuf> = HashSet::new();
 
         for entry in entries {
+            if cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
             let store = enclosing_store(&entry.path);
             if let Some(store) = &store {
                 stores.insert(store.clone());
@@ -111,6 +128,9 @@ impl ImpactGraph {
 
         let mut graph = Self::default();
         for (root, kinds) in &roots {
+            if cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
             for kind in kinds {
                 let owned = stores_of(root, *kind, &stores);
                 let targets = if owned.is_empty() {
@@ -132,7 +152,7 @@ impl ImpactGraph {
                 }
             }
         }
-        graph
+        Some(graph)
     }
 
     pub fn node(&mut self, node: Node) -> NodeIndex {
@@ -396,5 +416,15 @@ mod tests {
             graph.referencing_projects(Path::new("/repo/node_modules/react/index.js")),
             1
         );
+    }
+
+    #[test]
+    fn a_cancelled_build_stops_instead_of_finishing() {
+        let cancelled = AtomicBool::new(true);
+        assert!(ImpactGraph::from_entries_cancellable(
+            &entries(&["/repo/package.json", "/repo/node_modules/react/index.js"]),
+            &cancelled,
+        )
+        .is_none());
     }
 }

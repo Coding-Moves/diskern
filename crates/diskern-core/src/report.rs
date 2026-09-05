@@ -67,7 +67,7 @@ pub fn build_with(
     // at, worked out from the same entries the rest of the pipeline sees,
     // so a `node_modules` three live projects depend on can be told apart
     // from an abandoned one.
-    let impact = graph::ImpactGraph::from_entries(&entries);
+    let impact = graph::ImpactGraph::from_entries_cancellable(&entries, cancelled)?;
 
     // Classify before dedup, not after. A protected file has no business
     // in a duplicate set — the set is an offer to keep one copy and drop
@@ -435,5 +435,23 @@ mod tests {
             .iter()
             .any(|r| r.starts_with("referenced by")));
         assert_eq!(abandoned.reclaimable, 4);
+    }
+
+    /// The graph stage is a full pass over the entries in front of every
+    /// other cancellation check, so it has to answer a cancel itself —
+    /// otherwise it just moves the dead spot the last round removed.
+    #[test]
+    fn a_cancel_during_the_graph_stage_stops_the_report() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+
+        let cancelled = AtomicBool::new(true);
+        assert!(build_with(
+            scan_dir(dir.path()),
+            &temp_rules(),
+            &ReportOptions::default(),
+            &cancelled,
+        )
+        .is_none());
     }
 }
