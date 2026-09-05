@@ -1,7 +1,7 @@
 //! Assembles scanner + dedup + rules + risk into Findings — the single
 //! structure both the CLI and the Tauri UI render.
 
-use crate::{dedup, risk, rules::RulesDb, Category, FileEntry, Finding, Verdict};
+use crate::{dedup, graph, risk, rules::RulesDb, Category, FileEntry, Finding, Verdict};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,6 +63,12 @@ pub fn build_with(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    // The graph stage. Project roots and the dependency stores they point
+    // at, worked out from the same entries the rest of the pipeline sees,
+    // so a `node_modules` three live projects depend on can be told apart
+    // from an abandoned one.
+    let impact = graph::ImpactGraph::from_entries(&entries);
+
     // Classify before dedup, not after. A protected file has no business
     // in a duplicate set — the set is an offer to keep one copy and drop
     // the rest, and dropping a driver store copy is not on offer — and
@@ -70,48 +76,67 @@ pub fn build_with(
     //
     // Classification is cheap per entry, but a home directory is millions
     // of them, so it happens once and the answer is kept.
-    let mut verdicts: Vec<(Category, Verdict, Option<&crate::rules::Rule>)> =
-        Vec::with_capacity(entries.len());
+    let mut verdicts: Vec<Classified> = Vec::with_capacity(entries.len());
     for entry in &entries {
         if cancelled.load(Ordering::Relaxed) {
             return None;
         }
-        verdicts.push(rules.classify(&entry.path));
+        let (category, base, rule) = rules.classify(&entry.path);
+        // Evidence can only make a verdict more cautious, never less.
+        let referenced_by = impact.referencing_projects(&entry.path);
+        let verdict = risk::downgrade(base, referenced_by);
+        verdicts.push(Classified {
+            category,
+            verdict,
+            rule,
+            referenced_by,
+        });
     }
 
     let duplicate_sets = dedup::find_duplicates_filtered(
         &mut entries,
-        |i, e| e.size >= opts.dedup_min_size && verdicts[i].1 != Verdict::Protected,
+        |i, e| e.size >= opts.dedup_min_size && verdicts[i].verdict != Verdict::Protected,
         cancelled,
     )?;
     let files_scanned = entries.len() as u64;
 
     let mut findings = Vec::new();
-    for (entry, (category, verdict, rule)) in entries.into_iter().zip(verdicts) {
+    for (entry, class) in entries.into_iter().zip(verdicts) {
         if cancelled.load(Ordering::Relaxed) {
             return None;
         }
 
         // Unknown + unremarkable files aren't findings; don't drown the user.
-        if category == Category::Unknown {
+        if class.category == Category::Unknown {
             continue;
         }
 
-        let assessment = risk::assess(&entry, verdict, now);
-        let mut reasons: Vec<String> = rule
+        let assessment = risk::assess(&entry, class.verdict, now);
+        let mut reasons: Vec<String> = class
+            .rule
             .map(|r| vec![format!("matched rule {}: {}", r.id, r.description)])
             .unwrap_or_default();
+        if class.referenced_by > 0 {
+            reasons.push(format!(
+                "referenced by {} project{}",
+                class.referenced_by,
+                if class.referenced_by == 1 { "" } else { "s" }
+            ));
+        }
         reasons.extend(assessment.reasons);
 
         findings.push(Finding {
-            reclaimable: if verdict == Verdict::Protected {
-                0
-            } else {
-                entry.size
+            // Bytes nothing will ever offer to move are not reclaimable.
+            // `actions::quarantine` refuses Risky as well as Protected, and
+            // the UI renders neither with an action, so counting either
+            // towards the headline promises space the app won't free.
+            reclaimable: match class.verdict {
+                Verdict::Protected | Verdict::Risky => 0,
+                Verdict::Safe | Verdict::Review => entry.size,
             },
             entry,
-            category,
-            verdict,
+            category: class.category,
+            verdict: class.verdict,
             risk_score: assessment.score,
             reasons,
         });
@@ -127,6 +152,15 @@ pub fn build_with(
         total_reclaimable,
         files_scanned,
     })
+}
+
+/// What the pipeline worked out about one entry before findings are built.
+struct Classified<'a> {
+    category: Category,
+    /// After [`risk::downgrade`], not the rule's base verdict.
+    verdict: Verdict,
+    rule: Option<&'a crate::rules::Rule>,
+    referenced_by: usize,
 }
 
 /// The two halves of the report overlap, so they can't just be added.
@@ -335,5 +369,65 @@ mod tests {
         assert!(report.findings.iter().all(|f| f.verdict == Verdict::Protected));
         assert!(report.duplicate_sets.is_empty());
         assert_eq!(report.total_reclaimable, 0);
+    }
+
+    /// Issue #48. The graph stage was in the pipeline diagram and not in
+    /// the pipeline: `risk::downgrade` had no callers anywhere, so a
+    /// `node_modules` three live projects depend on got the same verdict
+    /// and the same reasons as an abandoned one.
+    #[test]
+    fn a_referenced_store_is_more_cautious_than_an_abandoned_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("live");
+        let dead = dir.path().join("dead");
+        std::fs::create_dir_all(live.join("node_modules/react")).unwrap();
+        std::fs::create_dir_all(dead.join("node_modules/react")).unwrap();
+        std::fs::write(live.join("package.json"), b"{}").unwrap();
+        std::fs::write(live.join("node_modules/react/index.js"), b"live").unwrap();
+        std::fs::write(dead.join("node_modules/react/index.js"), b"dead").unwrap();
+
+        let rules = RulesDb::new(
+            1,
+            vec![crate::rules::Rule {
+                id: "test-node-modules".into(),
+                patterns: vec!["**/node_modules/**".into()],
+                category: Category::BuildArtifact,
+                verdict: Verdict::Review,
+                description: "test".into(),
+            }],
+        );
+
+        let never = AtomicBool::new(false);
+        let report = build_with(
+            scan_dir(dir.path()),
+            &rules,
+            &ReportOptions::default(),
+            &never,
+        )
+        .unwrap();
+
+        let find = |needle: &str| {
+            report
+                .findings
+                .iter()
+                .find(|f| f.entry.path.to_string_lossy().contains(needle))
+                .unwrap()
+                .clone()
+        };
+
+        let referenced = find("live/node_modules");
+        assert_eq!(referenced.verdict, Verdict::Risky);
+        assert!(referenced
+            .reasons
+            .iter()
+            .any(|r| r == "referenced by 1 project"));
+        // Nothing offers to move a risky file, so its bytes are not on
+        // offer either.
+        assert_eq!(referenced.reclaimable, 0);
+
+        let abandoned = find("dead/node_modules");
+        assert_eq!(abandoned.verdict, Verdict::Review);
+        assert!(!abandoned.reasons.iter().any(|r| r.starts_with("referenced by")));
+        assert_eq!(abandoned.reclaimable, 4);
     }
 }
