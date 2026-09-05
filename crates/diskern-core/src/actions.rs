@@ -554,8 +554,8 @@ mod tests {
 
     /// A path serde cannot encode must stop the move, not follow it.
     ///
-    /// Linux and macOS both allow filenames that aren't valid UTF-8, and a
-    /// disk scanner meets them. Encoding after the move left the file in
+    /// Linux and macOS both allow filenames that are not valid UTF-8, and
+    /// a disk scanner meets them. Encoding after the move left the file in
     /// quarantine, absent from the manifest, under a flattened name with
     /// no way back — while the caller was told the operation failed.
     #[cfg(unix)]
@@ -565,8 +565,12 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let q = dir.path().join("quarantine");
-        // "café.dmg" in Latin-1: a valid filename, invalid UTF-8.
-        let victim = dir.path().join(std::ffi::OsStr::from_bytes(b"caf\xe9.dmg"));
+        // Raw bytes no UTF-8 decoder accepts, in an otherwise ordinary
+        // name: a legal filename on this platform, and one a scan of a
+        // real disk turns up in downloads unpacked from old archives.
+        let victim = dir
+            .path()
+            .join(std::ffi::OsStr::from_bytes(b"photo-\xff\xfe.dmg"));
         std::fs::write(&victim, b"payload").unwrap();
 
         let err = quarantine(&victim, Verdict::Review, &q).unwrap_err();
