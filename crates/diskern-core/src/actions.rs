@@ -686,4 +686,58 @@ mod tests {
         assert_eq!(summary.bytes_removed, 0);
         assert!(summary.failed.is_empty());
     }
+
+    /// Quarantine names are built from the original path, and on Windows
+    /// that path opens `C:\` — a colon and backslashes, none of which are
+    /// legal in a filename. Nothing may survive the flattening.
+    #[test]
+    fn a_quarantine_name_carries_no_separator_from_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let nested = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        let victim = nested.join("victim.txt");
+        std::fs::write(&victim, b"data").unwrap();
+
+        let record = quarantine(&victim, Verdict::Safe, &q).unwrap();
+        let name = record
+            .quarantined_to
+            .file_name()
+            .expect("a quarantined file has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        for separator in ['/', '\\', ':'] {
+            assert!(
+                !name.contains(separator),
+                "{name} still carries {separator:?}"
+            );
+        }
+        assert!(record.quarantined_to.exists());
+        assert_eq!(list(&q).unwrap().len(), 1);
+    }
+
+    /// The Windows half of `a_path_that_cannot_be_recorded_is_not_moved`.
+    ///
+    /// Windows filenames are UTF-16 and may hold an unpaired surrogate,
+    /// which serde rejects exactly as it rejects invalid UTF-8 on Unix —
+    /// so the same data loss was reachable here. Creating such a file
+    /// through the Win32 API is not dependable, so this pins the guard
+    /// that stops the move rather than the whole flow.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_that_cannot_be_recorded_is_refused() {
+        use std::os::windows::ffi::OsStringExt;
+
+        // "a\u{D800}.dat" — a lone high surrogate in an ordinary name.
+        let name = std::ffi::OsString::from_wide(&[0x0061, 0xD800, 0x002E, 0x0064, 0x0061, 0x0074]);
+        let record = QuarantineRecord {
+            original: PathBuf::from(name),
+            quarantined_to: PathBuf::from("quarantine"),
+            at_epoch: 0,
+        };
+
+        let err = encode(&record).unwrap_err();
+        assert!(err.to_string().contains("will not be moved"), "{err}");
+    }
 }

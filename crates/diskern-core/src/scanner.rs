@@ -246,6 +246,34 @@ mod tests {
         assert!(!is_excluded(Path::new("/process-data/x"), &excludes));
     }
 
+    /// The folding in `is_within` against a directory that really exists.
+    ///
+    /// Windows and macOS fold case in the filesystem itself, Linux does
+    /// not — so on Linux this passes only because the matcher folds, which
+    /// is the half that has to be right on all three.
+    #[test]
+    fn an_exclude_matches_a_real_directory_whatever_its_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("Cache");
+        std::fs::create_dir(&cache).unwrap();
+        std::fs::write(cache.join("blob.bin"), b"cached").unwrap();
+        std::fs::write(dir.path().join("keep.txt"), b"keep").unwrap();
+
+        let opts = ScanOptions {
+            roots: vec![dir.path().to_path_buf()],
+            // Written lowercase; the directory on disk is not.
+            excludes: vec![cache.to_string_lossy().to_lowercase()],
+            ..Default::default()
+        };
+        let entries = scan(&opts, Arc::new(ScanProgress::default())).unwrap();
+
+        assert_eq!(entries.len(), 1, "{entries:#?}");
+        assert_eq!(
+            entries[0].path.file_name().unwrap().to_string_lossy(),
+            "keep.txt"
+        );
+    }
+
     #[test]
     fn scans_a_temp_tree() {
         let dir = tempfile::tempdir().unwrap();
