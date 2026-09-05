@@ -11,7 +11,7 @@
 use crate::FileEntry;
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// A file whose presence makes the directory holding it a project root,
@@ -36,7 +36,7 @@ pub enum Node {
     DependencyStore(PathBuf), // e.g. a node_modules dir, ~/.cargo/registry
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ProjectKind {
     Cargo,
     Npm,
@@ -75,7 +75,18 @@ impl ImpactGraph {
     /// reference it — and it is where the "referenced by 3 projects"
     /// number comes from rather than always being 1.
     pub fn from_entries(entries: &[FileEntry]) -> Self {
-        let mut roots: HashMap<PathBuf, ProjectKind> = HashMap::new();
+        // A set of kinds per root, not one: a directory holding both a
+        // `Cargo.toml` and a `package.json` is both projects, and it is a
+        // shape that turns up constantly — any Rust binary with a web
+        // front end, this repository's own `app/` among them. Keeping one
+        // kind meant whichever marker the walk happened to yield last
+        // won, so one of `target/` and `node_modules/` came back
+        // unreferenced, and *which* one changed with directory order.
+        //
+        // Ordered maps, so the graph a given scan produces is the same
+        // graph every time. Verdicts are meant to be deterministic, and a
+        // reference count feeds straight into one.
+        let mut roots: BTreeMap<PathBuf, BTreeSet<ProjectKind>> = BTreeMap::new();
         let mut stores: HashSet<PathBuf> = HashSet::new();
 
         for entry in entries {
@@ -94,26 +105,31 @@ impl ImpactGraph {
                 continue;
             };
             if let Some(dir) = entry.path.parent() {
-                roots.insert(dir.to_path_buf(), kind);
+                roots.entry(dir.to_path_buf()).or_default().insert(kind);
             }
         }
 
         let mut graph = Self::default();
-        for (root, kind) in &roots {
-            let owned = stores_of(root, *kind, &stores);
-            let targets = if owned.is_empty() {
-                shared_store(root, *kind, &roots, &stores)
-            } else {
-                owned
-            };
+        for (root, kinds) in &roots {
+            for kind in kinds {
+                let owned = stores_of(root, *kind, &stores);
+                let targets = if owned.is_empty() {
+                    shared_store(root, *kind, &roots, &stores)
+                } else {
+                    owned
+                };
 
-            for store in targets {
-                let from = graph.node(Node::ProjectRoot {
-                    path: root.clone(),
-                    kind: *kind,
-                });
-                let to = graph.node(Node::DependencyStore(store));
-                graph.graph.add_edge(from, to, Edge::References);
+                for store in targets {
+                    // Keyed by path, so a root that is two kinds is still
+                    // one node with one edge per store — and one project
+                    // for anything counting references.
+                    let from = graph.node(Node::ProjectRoot {
+                        path: root.clone(),
+                        kind: *kind,
+                    });
+                    let to = graph.node(Node::DependencyStore(store));
+                    graph.graph.add_edge(from, to, Edge::References);
+                }
             }
         }
         graph
@@ -200,11 +216,14 @@ fn stores_of(root: &Path, kind: ProjectKind, seen: &HashSet<PathBuf>) -> Vec<Pat
 fn shared_store(
     root: &Path,
     kind: ProjectKind,
-    roots: &HashMap<PathBuf, ProjectKind>,
+    roots: &BTreeMap<PathBuf, BTreeSet<ProjectKind>>,
     seen: &HashSet<PathBuf>,
 ) -> Vec<PathBuf> {
     for ancestor in root.ancestors().skip(1) {
-        if roots.get(ancestor) != Some(&kind) {
+        if !roots
+            .get(ancestor)
+            .is_some_and(|kinds| kinds.contains(&kind))
+        {
             continue;
         }
         let stores = stores_of(ancestor, kind, seen);
@@ -331,6 +350,51 @@ mod tests {
         assert_eq!(
             graph.referencing_projects(Path::new("/repo/target/debug/app")),
             3
+        );
+    }
+
+    /// A directory can be more than one kind of project, and both of its
+    /// stores are then referenced. Keeping a single kind per root meant
+    /// whichever marker the walk yielded last won, so one store came back
+    /// unreferenced — and which one depended on directory order, which
+    /// makes the verdict non-deterministic. Both orders are asserted.
+    #[test]
+    fn a_root_that_is_two_projects_references_both_of_its_stores() {
+        let both = [
+            "/proj/Cargo.toml",
+            "/proj/package.json",
+            "/proj/target/debug/app",
+            "/proj/node_modules/react/index.js",
+        ];
+        let reversed: Vec<&str> = both.iter().copied().rev().collect();
+
+        for order in [both.to_vec(), reversed] {
+            let graph = ImpactGraph::from_entries(&entries(&order));
+            assert_eq!(
+                graph.referencing_projects(Path::new("/proj/target/debug/app")),
+                1,
+                "target/ in order {order:?}"
+            );
+            assert_eq!(
+                graph.referencing_projects(Path::new("/proj/node_modules/react/index.js")),
+                1,
+                "node_modules/ in order {order:?}"
+            );
+        }
+    }
+
+    /// A root that is two kinds is still one project, so a store it shares
+    /// with siblings must not be counted twice for it.
+    #[test]
+    fn a_two_kind_root_counts_once_against_a_shared_store() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Cargo.toml",
+            "/repo/package.json",
+            "/repo/node_modules/react/index.js",
+        ]));
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/node_modules/react/index.js")),
+            1
         );
     }
 }
