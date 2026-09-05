@@ -327,6 +327,12 @@ fn write_manifest(quarantine_dir: &Path, records: &[QuarantineRecord]) -> Result
     let path = manifest_path(quarantine_dir);
     let tmp = path.with_extension("jsonl.tmp");
 
+    // The directory need not exist yet: `purge` on a quarantine nothing
+    // has been moved into reads an empty list and lands here, and failing
+    // that with "No such file or directory" reads like a disk fault
+    // rather than the no-op it is.
+    std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
+
     let mut body = String::new();
     for record in records {
         body.push_str(&encode(record)?);
@@ -666,5 +672,14 @@ mod tests {
             );
         }
         assert_eq!(listed.len(), on_disk.len());
+    }
+
+    #[test]
+    fn purging_a_quarantine_nothing_was_moved_into_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = purge(&dir.path().join("never-used")).unwrap();
+        assert_eq!(summary.files_removed, 0);
+        assert_eq!(summary.bytes_removed, 0);
+        assert!(summary.failed.is_empty());
     }
 }
