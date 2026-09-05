@@ -84,17 +84,24 @@ jobs:
   # and lint regressions in the shell; the release workflow still owns
   # producing an actual bundle.
   #
-  # On both platforms the release workflow ships, because the shells differ:
-  # Linux links webkitgtk and the GTK3 stack, Windows links WebView2, and a
-  # `cfg`-shaped mistake compiles fine on one and not the other. Windows was
-  # previously compiled for the first time during the release build.
+  # Every platform the shell is built for, because the shells differ:
+  # Linux links webkitgtk and the GTK3 stack, Windows links WebView2,
+  # macOS links WKWebView, and a `cfg`-shaped mistake compiles fine on one
+  # and not another. Windows used to be compiled for the first time during
+  # the release build.
+  #
+  # macOS is here even though its release entry is still commented out.
+  # Leaving it off would hand whoever re-enables that entry the exact
+  # failure this job exists to prevent — a first compile after the tag is
+  # pushed. It costs a few minutes on PRs that touch `crates/` or `app/`,
+  # and nothing on any other PR: `changes` gates the whole job.
   app-tauri:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
