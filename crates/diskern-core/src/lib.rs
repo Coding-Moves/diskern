@@ -12,10 +12,19 @@
 //! ## Pipeline
 //!
 //! ```text
-//! scanner ──► index ──► dedup ──► graph ──► rules + risk ──► report
-//!                                                   │
-//!                                        (optional) ai narration
+//! scanner ──► graph ──► rules + risk ──► dedup ──► report
+//!                                                    │
+//!                                         (optional) ai narration
 //! ```
+//!
+//! Dedup runs *after* classification, not before: a duplicate set is an
+//! offer to keep one copy and drop the rest, so entries nothing will act
+//! on — protected system files, stores a live project references — have
+//! no business in one, and hashing them is the most expensive way to
+//! produce a number nobody can use. The graph runs first because the
+//! verdict it feeds ([`risk::downgrade`]) is part of deciding that.
+//!
+//! [`report::build_with`] is where the whole sequence lives.
 
 pub mod actions;
 pub mod dedup;
