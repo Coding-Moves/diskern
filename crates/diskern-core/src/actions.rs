@@ -572,15 +572,20 @@ mod tests {
             .path()
             .join(std::ffi::OsStr::from_bytes(b"photo-\xff\xfe.dmg"));
 
+        // `EILSEQ` on macOS: the errno APFS answers a filename that is
+        // not valid UTF-8 with.
+        const MACOS_EILSEQ: i32 = 92;
+
         match std::fs::write(&victim, b"payload") {
             Ok(()) => {}
-            // macOS validates filenames as UTF-8 in the filesystem itself
-            // and answers EILSEQ, so a name like this cannot exist there
-            // and the loss it caused is not reachable. Linux imposes no
-            // such rule, which is why this is checked rather than skipped
-            // by a `cfg`: if the fixture ever stops being creatable on
-            // Linux, that is a failure and not a quiet pass.
-            Err(_) if cfg!(target_os = "macos") => return,
+            // macOS validates filenames as UTF-8 in the filesystem itself,
+            // so a name like this cannot exist there and the loss it
+            // caused is not reachable. Linux imposes no such rule, which
+            // is why this is checked rather than skipped by a `cfg`: if
+            // the fixture ever stops being creatable, that is a failure
+            // and not a quiet pass. Only the one refusal that means
+            // "this platform forbids the name" is allowed through.
+            Err(e) if cfg!(target_os = "macos") && e.raw_os_error() == Some(MACOS_EILSEQ) => return,
             Err(e) => panic!("could not create the fixture: {e}"),
         }
 
