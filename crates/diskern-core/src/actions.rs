@@ -55,20 +55,31 @@ pub fn quarantine(
     std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
 
     let stamp = now_epoch();
-    let dest = unique_dest(quarantine_dir, stamp, file);
-
-    move_file(file, &dest)?;
-
     let record = QuarantineRecord {
         original: file.to_path_buf(),
-        quarantined_to: dest,
+        quarantined_to: unique_dest(quarantine_dir, stamp, file),
         at_epoch: stamp,
     };
 
-    // Record before returning. A caller that drops the returned value —
-    // which is exactly what the app's `quarantine_finding` used to do —
-    // must not be able to lose the only note of where the file came from.
-    append_to_manifest(quarantine_dir, &record)?;
+    // Encode before moving anything. `serde` refuses a `PathBuf` that
+    // isn't valid UTF-8, and Linux and macOS both allow filenames that
+    // aren't — a Latin-1 name out of an old archive is enough. Moving
+    // first and discovering that afterwards left the file in quarantine
+    // with no record of where it came from, under a flattened name that
+    // cannot be read back: the exact loss this manifest exists to stop.
+    let line = encode(&record)?;
+
+    move_file(file, &record.quarantined_to)?;
+
+    // The move happened; the record must follow it or the move must not
+    // stand. Anything else strands the file.
+    if let Err(e) = append_line(quarantine_dir, &line) {
+        // Best effort, and the only sensible order: the original was
+        // sitting here a moment ago, so putting it back is the outcome
+        // closest to nothing having happened.
+        let _ = move_file(&record.quarantined_to, &record.original);
+        return Err(e);
+    }
     Ok(record)
 }
 
@@ -225,11 +236,19 @@ pub fn manifest_path(quarantine_dir: &Path) -> PathBuf {
     quarantine_dir.join(MANIFEST_NAME)
 }
 
-fn append_to_manifest(quarantine_dir: &Path, record: &QuarantineRecord) -> Result<()> {
-    let path = manifest_path(quarantine_dir);
-    let line = serde_json::to_string(record)
-        .map_err(|e| GenomeError::Rules(format!("could not serialize a quarantine record: {e}")))?;
+/// One manifest line. Fails on a path that is not valid UTF-8, which is
+/// why every caller encodes before it moves anything.
+fn encode(record: &QuarantineRecord) -> Result<String> {
+    serde_json::to_string(record).map_err(|e| {
+        GenomeError::Rules(format!(
+            "cannot record {} in the quarantine manifest, so it will not be moved: {e}",
+            record.original.display()
+        ))
+    })
+}
 
+fn append_line(quarantine_dir: &Path, line: &str) -> Result<()> {
+    let path = manifest_path(quarantine_dir);
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -248,10 +267,7 @@ fn write_manifest(quarantine_dir: &Path, records: &[QuarantineRecord]) -> Result
 
     let mut body = String::new();
     for record in records {
-        let line = serde_json::to_string(record).map_err(|e| {
-            GenomeError::Rules(format!("could not serialize a quarantine record: {e}"))
-        })?;
-        body.push_str(&line);
+        body.push_str(&encode(record)?);
         body.push('\n');
     }
 
@@ -466,5 +482,35 @@ mod tests {
         let q = dir.path().join("quarantine");
         std::fs::create_dir_all(&q).unwrap();
         assert!(restore_from_manifest(&q, &q.join("invented")).is_err());
+    }
+
+    /// A path serde cannot encode must stop the move, not follow it.
+    ///
+    /// Linux and macOS both allow filenames that aren't valid UTF-8, and a
+    /// disk scanner meets them. Encoding after the move left the file in
+    /// quarantine, absent from the manifest, under a flattened name with
+    /// no way back — while the caller was told the operation failed.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_that_cannot_be_recorded_is_not_moved() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        // "café.dmg" in Latin-1: a valid filename, invalid UTF-8.
+        let victim = dir.path().join(std::ffi::OsStr::from_bytes(b"caf\xe9.dmg"));
+        std::fs::write(&victim, b"payload").unwrap();
+
+        let err = quarantine(&victim, Verdict::Review, &q).unwrap_err();
+        assert!(
+            err.to_string().contains("will not be moved"),
+            "unexpected error: {err}"
+        );
+
+        // The file is exactly where it was, and quarantine is untouched.
+        assert_eq!(std::fs::read(&victim).unwrap(), b"payload");
+        assert!(list(&q).unwrap().is_empty());
+        let strays = std::fs::read_dir(&q).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(strays, 0, "quarantine should hold no orphan");
     }
 }
