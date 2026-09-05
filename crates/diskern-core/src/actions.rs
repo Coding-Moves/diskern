@@ -114,9 +114,29 @@ fn unique_dest(quarantine_dir: &Path, stamp: i64, file: &Path) -> PathBuf {
 
 /// Restore a quarantined file to its original location.
 ///
+/// Refuses when something is already there. Both halves of `move_file`
+/// replace an existing destination without asking, and the files most
+/// likely to be quarantined are the ones most likely to come back: a
+/// browser cache is `safe` precisely because the browser rebuilds it, so
+/// "quarantine the cache, keep browsing, change your mind" ends with the
+/// undo destroying the newer file. Overwriting a file the user did not
+/// name is exactly what this module promises never to do, so an occupied
+/// destination is an error the caller shows rather than a decision this
+/// function makes.
+///
 /// Leaves the manifest alone — see [`restore_from_manifest`] for the
 /// version that also stops listing the file as quarantined.
 pub fn restore(record: &QuarantineRecord) -> Result<()> {
+    // symlink_metadata, not exists(): a broken symlink is something in
+    // the way too, and exists() follows the link and reports false.
+    if std::fs::symlink_metadata(&record.original).is_ok() {
+        return Err(GenomeError::Rules(format!(
+            "{} already exists; move or remove it and restore again — \
+             refusing to overwrite it with the quarantined copy",
+            record.original.display()
+        )));
+    }
+
     if let Some(parent) = record.original.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
     }
@@ -512,5 +532,34 @@ mod tests {
         assert!(list(&q).unwrap().is_empty());
         let strays = std::fs::read_dir(&q).map(|d| d.count()).unwrap_or(0);
         assert_eq!(strays, 0, "quarantine should hold no orphan");
+    }
+
+    /// Restoring must not destroy a file that came back on its own.
+    ///
+    /// The caches Diskern calls `safe` are the ones applications rebuild,
+    /// so this is the ordinary sequence, not a contrived one: quarantine
+    /// the cache, carry on using the app, then change your mind.
+    #[test]
+    fn restore_refuses_to_overwrite_something_already_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let original = dir.path().join("cache.dat");
+        std::fs::write(&original, b"old-copy").unwrap();
+
+        let rec = quarantine(&original, Verdict::Safe, &q).unwrap();
+        std::fs::write(&original, b"regenerated-by-the-app").unwrap();
+
+        let err = restore(&rec).unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+
+        // Neither copy was destroyed: the new one is still in place and
+        // the quarantined one is still restorable once it is moved aside.
+        assert_eq!(std::fs::read(&original).unwrap(), b"regenerated-by-the-app");
+        assert_eq!(std::fs::read(&rec.quarantined_to).unwrap(), b"old-copy");
+        assert_eq!(list(&q).unwrap().len(), 1);
+
+        std::fs::remove_file(&original).unwrap();
+        restore(&rec).unwrap();
+        assert_eq!(std::fs::read(&original).unwrap(), b"old-copy");
     }
 }
