@@ -92,7 +92,10 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
     <li className={`finding verdict-${f.verdict}`}>
       <span className="path">{f.entry.path}</span>
       <span className="size">{(f.entry.size / 1e6).toFixed(1)} MB</span>
-      <span className="why">{f.reasons[0]}</span>
+      {/* Every reason, not just the matched rule: "referenced by 3
+          projects" is what explains a risky row, and it is never the
+          first one. */}
+      <span className="why">{f.reasons.join(" · ")}</span>
 
       {canQuarantine && (
         <span className="row-action">
