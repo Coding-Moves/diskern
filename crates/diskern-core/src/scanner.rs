@@ -248,9 +248,10 @@ mod tests {
 
     /// The folding in `is_within` against a directory that really exists.
     ///
-    /// Windows and macOS fold case in the filesystem itself, Linux does
-    /// not — so on Linux this passes only because the matcher folds, which
-    /// is the half that has to be right on all three.
+    /// The filesystem's own case rules have no bearing on this, on any
+    /// platform: `is_excluded` compares two strings and never opens a
+    /// file. Drop the ASCII folding and this fails on Windows, macOS and
+    /// Linux alike — which is what makes it worth running on all three.
     #[test]
     fn an_exclude_matches_a_real_directory_whatever_its_case() {
         let dir = tempfile::tempdir().unwrap();
