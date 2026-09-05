@@ -33,6 +33,79 @@ struct ScanProgressPayload {
     bytes_seen: u64,
 }
 
+/// Everything a running scan owns outside itself: the ticker thread that
+/// emits `scan-progress`, and this scan's entry in the shared
+/// [`ActiveScan`] slot. Both are released on drop.
+///
+/// They used to be released by statements after the `.await`, which only
+/// run if control reaches them. A `?` between the two — there was one —
+/// returned on a panicking blocking task and left the ticker emitting
+/// every 150ms for the rest of the process, behind whatever the UI showed
+/// next. Dropping the command's future, which is how a Tauri command is
+/// cancelled, skipped the cleanup entirely. A guard cannot be skipped.
+struct ScanRun<'a> {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    ticker: Option<std::thread::JoinHandle<()>>,
+    state: &'a ActiveScan,
+    progress: Arc<scanner::ScanProgress>,
+}
+
+impl<'a> ScanRun<'a> {
+    fn start(
+        window: &Window,
+        state: &'a ActiveScan,
+        progress: Arc<scanner::ScanProgress>,
+    ) -> Self {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        // A plain OS thread keeps this independent of whatever async
+        // runtime Tauri is using internally.
+        let ticker = {
+            let progress = progress.clone();
+            let stop = stop.clone();
+            let window = window.clone();
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let payload = ScanProgressPayload {
+                        files_seen: progress.files_seen.load(Ordering::Relaxed),
+                        bytes_seen: progress.bytes_seen.load(Ordering::Relaxed),
+                    };
+                    let _ = window.emit("scan-progress", payload);
+                    std::thread::sleep(Duration::from_millis(150));
+                }
+            })
+        };
+
+        Self {
+            stop,
+            ticker: Some(ticker),
+            state,
+            progress,
+        }
+    }
+}
+
+impl Drop for ScanRun<'_> {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(ticker) = self.ticker.take() {
+            let _ = ticker.join();
+        }
+
+        // Clear only if the slot still holds *this* scan. An unconditional
+        // `= None` would let a short scan that started second erase a
+        // longer one's handle when it finished first, leaving the survivor
+        // with a Cancel button wired to nothing.
+        let mut slot = self.state.slot();
+        if slot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &self.progress))
+        {
+            *slot = None;
+        }
+    }
+}
+
 /// Read-only scan. Safe to expose; touches nothing.
 ///
 /// Emits a `scan-progress` event roughly every 150ms while running, so the
@@ -54,32 +127,12 @@ pub async fn start_scan(
     // here on purpose — holding it across the await below would make this
     // future non-Send.
     *state.slot() = Some(progress.clone());
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    // Ticker thread: emits progress snapshots on an interval until `stop`
-    // is set once the scan below finishes. A plain OS thread keeps this
-    // independent of whatever async runtime Tauri is using internally.
-    let ticker = {
-        let progress = progress.clone();
-        let stop = stop.clone();
-        let window = window.clone();
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                let payload = ScanProgressPayload {
-                    files_seen: progress.files_seen.load(Ordering::Relaxed),
-                    bytes_seen: progress.bytes_seen.load(Ordering::Relaxed),
-                };
-                let _ = window.emit("scan-progress", payload);
-                std::thread::sleep(Duration::from_millis(150));
-            }
-        })
-    };
+    // Everything this scan has to undo, undone on the way out however the
+    // way out happens.
+    let run = ScanRun::start(&window, &state, progress.clone());
 
     let progress_for_scan = progress.clone();
-    // Note the missing `?`: the join result is unwrapped *after* the cleanup
-    // below. Returning early here would leave the ticker running and this
-    // scan still listed as in-flight, so cancelling would target a scan that
-    // had already ended.
     let joined = tauri::async_runtime::spawn_blocking(move || {
         let opts = scanner::ScanOptions {
             roots,
@@ -102,21 +155,7 @@ pub async fn start_scan(
     })
     .await;
 
-    stop.store(true, Ordering::Relaxed);
-    let _ = ticker.join();
-    // Clear only if the slot still holds *this* scan. An unconditional
-    // `= None` would let a short scan that started second erase a longer
-    // one's handle when it finished first, leaving the survivor with a
-    // Cancel button wired to nothing.
-    {
-        let mut slot = state.slot();
-        if slot
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &progress))
-        {
-            *slot = None;
-        }
-    }
+    drop(run);
 
     // One final snapshot so the UI's last-seen count matches the real total.
     let _ = window.emit(
@@ -149,8 +188,14 @@ pub fn cancel_scan(state: State<'_, ActiveScan>) -> bool {
     }
 }
 
-/// The ONLY mutating command. Re-classifies server-side before acting —
-/// the frontend's claimed verdict is never trusted.
+/// The mutating commands below all take `quarantine_dir` from the
+/// frontend, which resolves it to `<app local data>/Quarantine`. Nothing
+/// here trusts a verdict the frontend claims — `quarantine_finding`
+/// re-classifies, and the restore/purge commands only ever touch paths
+/// the manifest in that directory says Diskern put there itself.
+///
+/// Re-classifies server-side before acting — the frontend's claimed
+/// verdict is never trusted.
 #[tauri::command]
 pub async fn quarantine_finding(
     path: PathBuf,
