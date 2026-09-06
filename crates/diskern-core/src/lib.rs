@@ -83,6 +83,22 @@ pub enum Verdict {
     Protected,
 }
 
+impl Verdict {
+    /// Return the more restrictive of two safety decisions.
+    ///
+    /// Keep this explicit instead of coupling action safety to the declaration
+    /// order of the enum. A future insertion or reordering must not silently
+    /// make a fresh defense-in-depth rule less restrictive.
+    pub const fn strictest(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Protected, _) | (_, Self::Protected) => Self::Protected,
+            (Self::Risky, _) | (_, Self::Risky) => Self::Risky,
+            (Self::Review, _) | (_, Self::Review) => Self::Review,
+            (Self::Safe, Self::Safe) => Self::Safe,
+        }
+    }
+}
+
 /// One finding = one row the user sees.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {

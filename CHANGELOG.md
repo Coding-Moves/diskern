@@ -29,6 +29,9 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Changed
 
+- Desktop quarantine now uses the exact finding from the completed backend
+  report, with graph-aware verdicts, generation-scoped report authority and
+  fail-closed stale-finding checks; frontend verdict values are never trusted
 - Licensed under MIT
 - Rule patterns are globs rather than substrings, so a rule stays inside
   the directory it names. The Firefox rule covers `cache2` rather than

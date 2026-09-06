@@ -14,7 +14,7 @@
 //! [`purge`] is the one operation here that deletes, and it deletes only
 //! what the manifest says this crate put there.
 
-use crate::{GenomeError, Result, Verdict};
+use crate::{report, rules::RulesDb, FileEntry, GenomeError, Result, Verdict};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -112,6 +112,93 @@ pub fn quarantine(
         return Err(e);
     }
     Ok(record)
+}
+
+/// Quarantine a finding selected from a backend-owned report.
+///
+/// `path` is an exact path lookup key. It is deliberately not canonicalized:
+/// a symlink or other alias must not borrow the authorization of a scanned
+/// object. The report verdict includes graph evidence from the completed scan;
+/// a fresh static rule may only tighten it. The report metadata is checked
+/// without using access time, since reading a file can legitimately update
+/// atime without changing the object.
+pub fn quarantine_finding(
+    path: &Path,
+    report: &report::Report,
+    rules: &RulesDb,
+    quarantine_dir: &Path,
+) -> Result<QuarantineRecord> {
+    quarantine_finding_with_authorization(path, report, rules, quarantine_dir, || true)
+}
+
+/// Report-bound quarantine with a final authority check supplied by the
+/// caller. Tauri uses this to reject a lease invalidated by a newer scan
+/// without holding the report mutex over filesystem I/O.
+pub fn quarantine_finding_with_authorization<F>(
+    path: &Path,
+    report: &report::Report,
+    rules: &RulesDb,
+    quarantine_dir: &Path,
+    still_authorized: F,
+) -> Result<QuarantineRecord>
+where
+    F: Fn() -> bool,
+{
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.entry.path == path)
+        .ok_or_else(|| {
+            GenomeError::Rules(format!(
+                "{} is not present in the authoritative report; scan again",
+                path.display()
+            ))
+        })?;
+
+    let (_, fresh_verdict, _) = rules.classify(path);
+    let effective_verdict = finding.verdict.strictest(fresh_verdict);
+    if matches!(effective_verdict, Verdict::Risky | Verdict::Protected) {
+        return Err(GenomeError::Rules(format!(
+            "{} is classified {effective_verdict:?}; action refused",
+            path.display()
+        )));
+    }
+
+    ensure_entry_is_current(&finding.entry)?;
+    if !still_authorized() {
+        return Err(GenomeError::Rules(
+            "scan report was superseded; refusing to quarantine — scan again".into(),
+        ));
+    }
+
+    quarantine(&finding.entry.path, effective_verdict, quarantine_dir)
+}
+
+/// Check the metadata captured by the scanner, excluding atime.
+///
+/// Size, modification time, and symlink-ness catch ordinary replacement and
+/// mutation. They are not a universal filesystem identity proof: platforms
+/// with coarse timestamps and an attacker able to replace a path in the final
+/// rename window remain outside this bounded path-based guarantee.
+fn ensure_entry_is_current(entry: &FileEntry) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(&entry.path).map_err(|e| io_err(&entry.path, e))?;
+    let modified = metadata.modified().ok().and_then(to_epoch);
+    let is_symlink = metadata.file_type().is_symlink();
+
+    if metadata.len() != entry.size || modified != entry.modified || is_symlink != entry.is_symlink
+    {
+        return Err(GenomeError::Rules(format!(
+            "{} changed since the report was built; scan again before quarantining",
+            entry.path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn to_epoch(t: std::time::SystemTime) -> Option<i64> {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
 }
 
 /// A quarantine filename that no existing file already owns.
@@ -389,6 +476,53 @@ fn now_epoch() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    fn entry_for(path: &Path) -> FileEntry {
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        let epoch = |time: std::time::SystemTime| {
+            time.duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        };
+        FileEntry {
+            path: path.to_path_buf(),
+            size: metadata.len(),
+            modified: metadata.modified().ok().map(epoch),
+            accessed: metadata.accessed().ok().map(epoch),
+            is_symlink: metadata.file_type().is_symlink(),
+            hash: None,
+        }
+    }
+
+    fn report_for(path: &Path, verdict: Verdict) -> report::Report {
+        report::Report {
+            findings: vec![crate::Finding {
+                entry: entry_for(path),
+                category: crate::Category::TempFile,
+                verdict,
+                risk_score: 0.5,
+                reasons: vec!["test finding".into()],
+                reclaimable: path.metadata().unwrap().len(),
+            }],
+            duplicate_sets: vec![],
+            total_reclaimable: path.metadata().unwrap().len(),
+            files_scanned: 1,
+        }
+    }
+
+    fn rules_with_verdict(path_pattern: &str, verdict: Verdict) -> RulesDb {
+        RulesDb::new(
+            1,
+            vec![crate::rules::Rule {
+                id: "test-rule".into(),
+                patterns: vec![path_pattern.into()],
+                category: crate::Category::TempFile,
+                verdict,
+                description: "test rule".into(),
+            }],
+        )
+    }
 
     #[test]
     fn quarantine_and_restore_roundtrip() {
@@ -403,6 +537,165 @@ mod tests {
 
         restore(&rec).unwrap();
         assert!(f.exists());
+    }
+
+    #[test]
+    fn referenced_node_modules_finding_cannot_be_quarantined() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let target = project.join("node_modules/react/index.js");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(project.join("package.json"), b"{}").unwrap();
+        std::fs::write(&target, b"live dependency").unwrap();
+
+        let rules = rules_with_verdict("**/node_modules/**", Verdict::Review);
+        let entries = crate::scanner::scan(
+            &crate::scanner::ScanOptions {
+                roots: vec![dir.path().to_path_buf()],
+                ..Default::default()
+            },
+            Arc::new(crate::scanner::ScanProgress::default()),
+        )
+        .unwrap();
+        let report = crate::report::build(entries, &rules);
+        let finding = report
+            .findings
+            .iter()
+            .find(|finding| finding.entry.path == target)
+            .unwrap();
+        assert_eq!(finding.verdict, Verdict::Risky);
+        assert!(
+            quarantine_finding(&target, &report, &rules, &dir.path().join("quarantine")).is_err()
+        );
+        assert!(target.exists());
+    }
+
+    #[test]
+    fn an_authoritative_review_finding_can_be_quarantined() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let quarantine_dir = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+
+        let record = quarantine_finding(&target, &report, &rules, &quarantine_dir).unwrap();
+        assert!(!target.exists());
+        assert!(record.quarantined_to.exists());
+    }
+
+    #[test]
+    fn a_path_missing_from_the_authoritative_report_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("not-in-report.bin");
+        let quarantine_dir = dir.path().join("quarantine");
+        std::fs::write(&target, b"keep").unwrap();
+        let report = report::Report {
+            findings: vec![],
+            duplicate_sets: vec![],
+            total_reclaimable: 0,
+            files_scanned: 1,
+        };
+        let rules = rules_with_verdict("**/*.bin", Verdict::Review);
+
+        let result = quarantine_finding(&target, &report, &rules, &quarantine_dir);
+        assert!(result.is_err());
+        assert!(target.exists());
+        assert!(!quarantine_dir.exists());
+    }
+
+    #[test]
+    fn fresh_rules_only_tighten_the_report_verdict() {
+        let cases = [
+            (Verdict::Risky, Verdict::Review, "report-risky"),
+            (Verdict::Review, Verdict::Protected, "report-review"),
+            (Verdict::Safe, Verdict::Risky, "report-safe"),
+        ];
+
+        for (report_verdict, fresh_verdict, name) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join(name);
+            std::fs::write(&target, b"data").unwrap();
+            let report = report_for(&target, report_verdict);
+            let rules = rules_with_verdict("**/*", fresh_verdict);
+
+            let result =
+                quarantine_finding(&target, &report, &rules, &dir.path().join("quarantine"));
+            assert!(result.is_err(), "{report_verdict:?} + {fresh_verdict:?}");
+            assert!(target.exists());
+        }
+    }
+
+    #[test]
+    fn reading_a_finding_does_not_invalidate_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let quarantine_dir = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"cache");
+        quarantine_finding(&target, &report, &rules, &quarantine_dir).unwrap();
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn a_modified_finding_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        std::fs::write(&target, b"before").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+        std::fs::write(&target, b"after and different").unwrap();
+
+        let result = quarantine_finding(&target, &report, &rules, &dir.path().join("quarantine"));
+        assert!(result.is_err());
+        assert!(target.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unscanned_symlink_alias_cannot_borrow_authorization() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let alias = dir.path().join("alias.bin");
+        std::fs::write(&target, b"cache").unwrap();
+        symlink(&target, &alias).unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/*.bin", Verdict::Review);
+
+        let result = quarantine_finding(&alias, &report, &rules, &dir.path().join("quarantine"));
+        assert!(result.is_err());
+        assert!(target.exists());
+        assert!(alias.exists());
+    }
+
+    #[test]
+    fn completed_report_is_the_review_snapshot_until_a_new_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("node_modules/abandoned/index.js");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"dependency").unwrap();
+        let rules = rules_with_verdict("**/node_modules/**", Verdict::Review);
+        let entries = crate::scanner::scan(
+            &crate::scanner::ScanOptions {
+                roots: vec![dir.path().to_path_buf()],
+                ..Default::default()
+            },
+            Arc::new(crate::scanner::ScanProgress::default()),
+        )
+        .unwrap();
+        let report = crate::report::build(entries, &rules);
+        assert_eq!(report.findings[0].verdict, Verdict::Review);
+
+        // A changed graph is not silently treated as a newly reviewed report.
+        // The completed report remains the user's snapshot; the UI must scan
+        // again before a new graph becomes authoritative.
+        std::fs::write(dir.path().join("package.json"), b"{}").unwrap();
+        quarantine_finding(&target, &report, &rules, &dir.path().join("quarantine")).unwrap();
     }
 
     /// Issue #42. `quarantine` handled the cross-filesystem case and
