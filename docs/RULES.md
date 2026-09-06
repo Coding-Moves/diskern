@@ -95,3 +95,8 @@ rules PRs are very welcome. Guidelines:
    not), what happens after removal.
 4. Add a test in [`rules.rs`](../crates/diskern-core/src/rules.rs) if the
    rule protects something critical.
+
+Don't want to write the JSON? Filing a
+[rules database entry](https://github.com/Coding-Moves/diskern/issues/new?template=rule_request.md)
+with the path and what regenerates it is just as useful — someone else
+can turn it into a rule from there.
