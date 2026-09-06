@@ -849,6 +849,7 @@ dependencies = [
  "clap",
  "diskern-core",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
