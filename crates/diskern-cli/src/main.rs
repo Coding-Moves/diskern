@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use diskern_core::{report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
@@ -19,6 +19,7 @@ enum Command {
     /// Read-only scan: find duplicates, caches, and reclaimable space.
     Scan {
         /// Directories to scan
+        #[arg(required = true)]
         roots: Vec<PathBuf>,
         /// Emit full JSON report instead of a summary
         #[arg(long)]
@@ -183,6 +184,15 @@ fn print_findings(findings: &[&Finding], top: usize) {
     }
 }
 
+fn validate_roots(roots: &[PathBuf]) -> Result<()> {
+    for root in roots {
+        if !root.exists() {
+            bail!("scan root does not exist: {}", root.display());
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -192,6 +202,7 @@ fn main() -> Result<()> {
             top,
             verdict,
         } => {
+            validate_roots(&roots)?;
             let opts = scanner::ScanOptions {
                 roots,
                 ..Default::default()
@@ -259,7 +270,30 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::human_bytes;
+    use super::{human_bytes, validate_roots, Cli};
+    use clap::{error::ErrorKind, Parser};
+    use std::path::PathBuf;
+
+    #[test]
+    fn scan_requires_at_least_one_root() {
+        let error = match Cli::try_parse_from(["diskern", "scan"]) {
+            Ok(_) => panic!("scan without roots should be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn nonexistent_scan_root_is_rejected_before_scanning() {
+        let missing = PathBuf::from("diskern-test-root-that-does-not-exist");
+        let error = validate_roots(std::slice::from_ref(&missing)).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("scan root does not exist: {}", missing.display())
+        );
+    }
 
     #[test]
     fn scales_to_a_readable_unit() {

@@ -47,6 +47,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- `diskern scan` now rejects missing and nonexistent roots instead of
+  reporting a successful empty scan
 - Restoring a quarantined file across filesystems no longer fails with
   `EXDEV`
 - Restore refuses when something is already at the original path, rather
