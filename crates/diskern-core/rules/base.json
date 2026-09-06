@@ -87,7 +87,7 @@
     },
     {
       "id": "temp-dirs",
-      "patterns": ["/tmp/**", "**/var/tmp/**", "**/appdata/local/temp/**"],
+      "patterns": ["/tmp/**", "/var/tmp/**", "/private/var/tmp/**", "**/appdata/local/temp/**"],
       "category": "temp_file",
       "verdict": "review",
       "description": "Temporary files. Usually safe once no program is using them."

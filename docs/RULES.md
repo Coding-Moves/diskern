@@ -48,9 +48,10 @@ evidence (e.g. recently-accessed files), never less.
   - a pattern that starts with `/` is anchored at the filesystem root
 
 That anchoring is what keeps a rule inside the directory it names.
-`/tmp/**` is the root's scratch directory; it does not reach
-`/home/user/tmp/tax-return.pdf`. `**/node_modules/**` still matches at
-any depth, because that is what the rule means.
+`/tmp/**` and `/var/tmp/**` are root scratch directories; they do not reach
+`/home/user/tmp/tax-return.pdf` or a project's `var/tmp`. macOS's corresponding
+system path is `/private/var/tmp/**`. `**/node_modules/**` still matches at any
+depth, because that is what the rule means.
 
 Write patterns to end in `/**` when the rule is about a directory, and
 as `**/*.ext` when it is about an extension. A directory pattern without

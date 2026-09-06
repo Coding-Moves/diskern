@@ -47,6 +47,7 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The system temp rule no longer reaches user and project `var/tmp` directories
 - Restoring a quarantined file across filesystems no longer fails with
   `EXDEV`
 - Restore refuses when something is already at the original path, rather
