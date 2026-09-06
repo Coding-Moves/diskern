@@ -66,6 +66,12 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
 setup and guidelines, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for how the pieces fit together.
 
+Looking for somewhere to start? Issues are labelled by difficulty:
+[`level: beginner`](https://github.com/Coding-Moves/diskern/issues?q=is%3Aopen+label%3A%22level%3A+beginner%22)
+is scoped to a single file with the reasoning worked out, and teaching
+Diskern about a cache on your platform is a
+[rules change](docs/RULES.md) that needs no Rust at all.
+
 ## License
 
 [MIT](LICENSE). Unless you explicitly state otherwise, any contribution
