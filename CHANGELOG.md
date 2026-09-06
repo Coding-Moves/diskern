@@ -47,6 +47,7 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- Chrome caches under macOS `~/Library/Caches` now appear in scan reports
 - Restoring a quarantined file across filesystems no longer fails with
   `EXDEV`
 - Restore refuses when something is already at the original path, rather
