@@ -23,8 +23,23 @@ const CATEGORY_LABEL = {
 // and the Rust command re-checks server-side anyway (defense in depth).
 const ACTIONABLE_VERDICTS = new Set(["safe", "review"]);
 
-function bytesToGB(n) {
-  return (n / 1e9).toFixed(2);
+// Same SI thresholds and 999.95 carry as crates/diskern-cli human_bytes,
+// so the desktop app and CLI describe a finding the same way.
+function humanBytes(n) {
+  const UNITS = ["B", "KB", "MB", "GB", "TB"];
+  let value = Number(n);
+  let unit = 0;
+  // 999.95, not 1000.0: at one decimal place anything at or above that
+  // rounds to "1000.0", which belongs in the next unit up. Choosing the
+  // unit before rounding printed 999_999 as "1000.0 KB".
+  while (value >= 999.95 && unit < UNITS.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  if (unit === 0) {
+    return `${Math.trunc(n)} B`;
+  }
+  return `${value.toFixed(1)} ${UNITS[unit]}`;
 }
 
 function groupFindings(findings) {
@@ -91,7 +106,7 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
   return (
     <li className={`finding verdict-${f.verdict}`}>
       <span className="path">{f.entry.path}</span>
-      <span className="size">{(f.entry.size / 1e6).toFixed(1)} MB</span>
+      <span className="size">{humanBytes(f.entry.size)}</span>
       {/* Every reason, not just the matched rule: "referenced by 3
           projects" is what explains a risky row, and it is never the
           first one. */}
@@ -141,7 +156,7 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
         <span className="chevron">{isOpen ? "▾" : "▸"}</span>
         {title}
         <span className="group-meta">
-          {items.length} item{items.length === 1 ? "" : "s"} · {bytesToGB(total)} GB
+          {items.length} item{items.length === 1 ? "" : "s"} · {humanBytes(total)}
         </span>
       </button>
       {isOpen && (
@@ -178,7 +193,7 @@ function DuplicatesSection({ sets }) {
         <span className="chevron">{isOpen ? "▾" : "▸"}</span>
         Duplicate files
         <span className="group-meta">
-          {sets.length} set{sets.length === 1 ? "" : "s"} · {bytesToGB(total)} GB wasted
+          {sets.length} set{sets.length === 1 ? "" : "s"} · {humanBytes(total)} wasted
         </span>
       </button>
       {isOpen && (
@@ -186,8 +201,8 @@ function DuplicatesSection({ sets }) {
           {sets.map((set, i) => (
             <div key={i} className="dup-set">
               <div className="dup-set-header">
-                {set.paths.length} copies · {(set.size / 1e6).toFixed(1)} MB each ·{" "}
-                {(set.wasted / 1e6).toFixed(1)} MB wasted
+                {set.paths.length} copies · {humanBytes(set.size)} each ·{" "}
+                {humanBytes(set.wasted)} wasted
               </div>
               <ul className="dup-paths">
                 {set.paths.map((p, j) => (
@@ -258,7 +273,7 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
       const summary = await invoke("purge_quarantine", { quarantineDir });
       setPurgeNotice(
         `Deleted ${summary.files_removed} file${summary.files_removed === 1 ? "" : "s"}` +
-          ` · ${(summary.bytes_removed / 1e6).toFixed(1)} MB freed` +
+          ` · ${humanBytes(summary.bytes_removed)} freed` +
           (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
       );
       await reload();
@@ -358,7 +373,7 @@ function ScanningIndicator({ filesSeen, bytesSeen, onCancel, cancelling }) {
       </div>
       <p className="progress-count">
         {filesSeen.toLocaleString()} files found
-        {bytesSeen > 0 && <> · {(bytesSeen / 1e9).toFixed(2)} GB so far</>}
+        {bytesSeen > 0 && <> · {humanBytes(bytesSeen)} so far</>}
       </p>
       {/* The walk checks the cancel flag per entry, so stopping is quick but
           not instant — say "Stopping…" rather than pretending it's done. */}
@@ -543,7 +558,7 @@ export default function App() {
             {scannedFolder && <span className="scanned-folder">{scannedFolder}</span>}
             <br />
             {report.files_scanned.toLocaleString()} files scanned ·{" "}
-            {bytesToGB(report.total_reclaimable - reclaimed)} GB reclaimable
+            {humanBytes(report.total_reclaimable - reclaimed)} reclaimable
           </p>
 
           <button onClick={runScan} disabled={scanning}>
