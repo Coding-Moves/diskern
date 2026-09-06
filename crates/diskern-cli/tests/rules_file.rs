@@ -89,3 +89,43 @@ fn malformed_rules_file_fails_clearly() {
     assert!(stderr.contains("could not parse rules file"), "{stderr}");
     assert!(stderr.contains("malformed.json"), "{stderr}");
 }
+
+#[test]
+fn invalid_glob_in_rules_file_fails_before_scan() {
+    let root = tempdir().unwrap();
+    let rules = root.path().join("invalid-glob.json");
+    write_rules(&rules, "[");
+
+    let output = run_scan(root.path(), Some(&rules));
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("could not validate rules file"), "{stderr}");
+    assert!(stderr.contains("invalid glob pattern"), "{stderr}");
+    assert!(stderr.contains("test-rule"), "{stderr}");
+}
+
+#[test]
+fn external_rules_cannot_shadow_embedded_protected_rules() {
+    let root = tempdir().unwrap();
+    let protected_path = root.path().join("windows/installer/setup.msi");
+    fs::create_dir_all(protected_path.parent().unwrap()).unwrap();
+    fs::write(&protected_path, b"installer").unwrap();
+    let rules = root.path().join("rules.json");
+    write_rules(&rules, "**/*.msi");
+
+    let output = run_scan(root.path(), Some(&rules));
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("matched rule windows-installer-cache"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("matched rule test-rule"), "{stdout}");
+    assert!(stdout.contains("Protected — do not touch"), "{stdout}");
+}

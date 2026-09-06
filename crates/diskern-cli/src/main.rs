@@ -197,8 +197,15 @@ fn load_rules(path: Option<&std::path::Path>) -> Result<RulesDb> {
             path.display()
         )
     })?;
-    serde_json::from_slice(&contents)
-        .with_context(|| format!("could not parse rules file '{}' as JSON", path.display()))
+    let rules: RulesDb = serde_json::from_slice(&contents)
+        .with_context(|| format!("could not parse rules file '{}' as JSON", path.display()))?;
+    rules.validate().with_context(|| {
+        format!(
+            "could not validate rules file '{}'; every pattern must be a valid glob",
+            path.display()
+        )
+    })?;
+    Ok(rules.with_embedded_protected_rules())
 }
 
 fn main() -> Result<()> {
