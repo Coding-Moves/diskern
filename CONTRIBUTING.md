@@ -46,12 +46,35 @@ verdict levels and the safety reasoning are in
 [`crates/diskern-core/rules/base.json`](crates/diskern-core/rules/base.json),
 and adding one needs no Rust.
 
-**Issues labelled `good first issue`** are scoped to a single file with
-the reasoning already worked out.
-
 **Documentation.** If something here or in `docs/` was wrong or missing
 when you followed it, that is a bug report worth filing even if you
 don't fix it.
+
+### Picking an issue
+
+Open issues carry a difficulty label, so you can choose by how much of
+the codebase you need to hold in your head at once:
+
+| Label | What it means |
+| --- | --- |
+| [`level: beginner`](https://github.com/Coding-Moves/diskern/issues?q=is%3Aopen+label%3A%22level%3A+beginner%22) | Scoped to one file, with the reasoning already worked out — a rule, a flag, a formatting fix. |
+| [`level: intermediate`](https://github.com/Coding-Moves/diskern/issues?q=is%3Aopen+label%3A%22level%3A+intermediate%22) | Sits inside one crate and has to be tested against it — a stage in the report pipeline, a test harness. |
+| [`level: advanced`](https://github.com/Coding-Moves/diskern/issues?q=is%3Aopen+label%3A%22level%3A+advanced%22) | Cross-cutting, or lands on a safety guarantee. Say what you're planning on the issue before you start. |
+
+Most `level: beginner` issues are also labelled
+[`good first issue`](https://github.com/Coding-Moves/diskern/labels/good%20first%20issue);
+[`help wanted`](https://github.com/Coding-Moves/diskern/labels/help%20wanted)
+means we'd particularly like someone to take it.
+
+The rest of the labels say where a change lands rather than how hard it
+is. `engine`, `cli` and `app` name the crate; `backend` and `frontend`
+are the same split in broader terms; `rules`, `safety`, `ui/ux`, `ci`,
+`testing`, `performance` and `documentation` name the concern.
+`priority: high` means correctness or safety, not a deadline.
+
+Comment on the issue before you start, so two people don't write the
+same patch. If nothing fits, opening an issue to describe what you want
+to change is a fine first contribution on its own.
 
 ## The loop
 
