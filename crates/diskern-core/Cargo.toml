@@ -21,7 +21,6 @@ blake3.workspace = true
 jwalk.workspace = true
 rayon.workspace = true
 petgraph.workspace = true
-dashmap.workspace = true
 globset.workspace = true
 
 [dev-dependencies]
