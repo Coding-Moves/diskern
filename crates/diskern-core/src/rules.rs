@@ -81,6 +81,15 @@ impl RulesDb {
     /// for a rule that can never match.
     pub fn validate(&self) -> Result<()> {
         for rule in &self.rules {
+            // An empty pattern list compiles cleanly into a GlobSet that
+            // matches nothing, so it fails the same way a bad glob does —
+            // silently, and only for the rule the author cared about.
+            if rule.patterns.is_empty() {
+                return Err(GenomeError::Rules(format!(
+                    "rule '{}' has no patterns, so it can never match",
+                    rule.id
+                )));
+            }
             for pattern in &rule.patterns {
                 build_glob(pattern).map_err(|error| {
                     GenomeError::Rules(format!(
@@ -272,6 +281,26 @@ mod tests {
             .expect_err("invalid glob must fail validation");
         assert!(error.to_string().contains("broken"));
         assert!(error.to_string().contains("invalid glob pattern"));
+    }
+
+    #[test]
+    fn rules_without_patterns_are_rejected() {
+        let db = RulesDb::new(
+            1,
+            vec![Rule {
+                id: "empty".into(),
+                patterns: vec![],
+                category: Category::Unknown,
+                verdict: Verdict::Review,
+                description: "rule with no patterns".into(),
+            }],
+        );
+
+        let error = db
+            .validate()
+            .expect_err("a rule with no patterns must fail validation");
+        assert!(error.to_string().contains("empty"));
+        assert!(error.to_string().contains("can never match"));
     }
 
     #[test]
