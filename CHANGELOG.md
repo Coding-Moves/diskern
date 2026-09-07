@@ -8,6 +8,7 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Added
 
+- `diskern scan --rules <file>` to test scans with an external rules database
 - Cancel a running scan from the desktop app
 - `diskern scan` prints the findings themselves — grouped by verdict and
   category, with `--top` to cap each group and `--verdict` to filter
