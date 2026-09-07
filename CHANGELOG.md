@@ -11,6 +11,8 @@ All notable changes to Diskern are documented here. The format follows
 - A relative scan root no longer hides every finding a root-anchored rule
   would have made. `diskern scan tmp` from `/var` reported nothing to
   clean; roots are resolved to absolute paths before the walk
+- Scanning a root inside an excluded directory says so, instead of walking
+  it to an empty report that reads like a clean disk
 
 ## [0.2.0] — 2026-09-07
 

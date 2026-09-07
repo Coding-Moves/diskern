@@ -63,14 +63,38 @@ impl ScanProgress {
 /// so the UI can render results while the scan runs.
 pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileEntry>> {
     let mut out = Vec::new();
+    // Normalized once for the whole scan: the exclude list never changes, and
+    // both the root check below and every directory the walk opens use it.
+    let excludes: Vec<String> = opts.excludes.iter().map(|e| normalize_exclude(e)).collect();
 
     for root in &opts.roots {
         if progress.cancelled.load(Ordering::Relaxed) {
             return Err(crate::GenomeError::Cancelled);
         }
-        walk_root(&absolute_root(root)?, opts, &progress, &mut out)?;
+        let root = absolute_root(root)?;
+        // Say so, rather than walking a root whose every entry the exclude
+        // list will drop. `/run/user/<uid>` holds real caches and sits under
+        // the `/run` exclude, so this is reachable — and an empty report is
+        // indistinguishable from a clean disk, which is the answer issue #103
+        // and #82 are both about not giving.
+        if let Some(exclude) = excluded_by(&root, &excludes) {
+            return Err(crate::GenomeError::ExcludedRoot {
+                path: root,
+                exclude: exclude.to_string(),
+            });
+        }
+        walk_root(&root, &excludes, opts, &progress, &mut out)?;
     }
     Ok(out)
+}
+
+/// Which exclude, if any, contains `path`.
+fn excluded_by<'a>(path: &Path, excludes: &'a [String]) -> Option<&'a str> {
+    let path = path.to_string_lossy();
+    excludes
+        .iter()
+        .find(|ex| is_within(&path, ex))
+        .map(String::as_str)
 }
 
 /// Issue #103. The rules are written against absolute paths, and the ones
@@ -99,13 +123,14 @@ fn absolute_root(root: &Path) -> Result<PathBuf> {
 
 fn walk_root(
     root: &Path,
+    excludes: &[String],
     opts: &ScanOptions,
     progress: &ScanProgress,
     out: &mut Vec<FileEntry>,
 ) -> Result<()> {
-    // Normalized once, not per directory: `process_read_dir` runs on every
-    // directory the walk opens, and the exclude list never changes.
-    let excludes: Vec<String> = opts.excludes.iter().map(|e| normalize_exclude(e)).collect();
+    // `process_read_dir` runs on every directory the walk opens, so the list
+    // arrives already normalized rather than being rebuilt here.
+    let excludes = excludes.to_vec();
 
     let walker = jwalk::WalkDir::new(root)
         .follow_links(opts.follow_symlinks)
@@ -327,6 +352,53 @@ mod tests {
     fn an_absolute_root_is_left_alone() {
         let root = Path::new(r"C:\Users\example\AppData\Local\Temp");
         assert_eq!(absolute_root(root).unwrap(), root);
+    }
+
+    /// A root the exclude list covers is an error, not an empty scan. The
+    /// walk would drop every entry and the report would look like a clean
+    /// disk, which is the answer #103 exists to stop giving.
+    #[test]
+    fn a_root_inside_an_exclude_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.bin"), b"x").unwrap();
+
+        let err = scan(
+            &ScanOptions {
+                roots: vec![dir.path().to_path_buf()],
+                excludes: vec![dir.path().to_string_lossy().into_owned()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, crate::GenomeError::ExcludedRoot { .. }),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("excluded directory"), "{err}");
+    }
+
+    /// The check is about containment, not a shared prefix: `/runtime-data`
+    /// is not inside `/run`, the same property `is_within` is written for.
+    #[test]
+    fn a_root_merely_sharing_a_prefix_with_an_exclude_is_scanned() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime-data");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.bin"), b"x").unwrap();
+
+        let entries = scan(
+            &ScanOptions {
+                roots: vec![root],
+                excludes: vec![dir.path().join("run").to_string_lossy().into_owned()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
     }
 
     #[test]
