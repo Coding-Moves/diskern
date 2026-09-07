@@ -6,9 +6,14 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-07
+
 ### Added
 
-- `diskern scan --rules <file>` to test scans with an external rules database
+- `diskern scan --rules <file>` to test scans with an external rules
+  database. Patterns are validated before the scan starts, and the
+  embedded `protected` rules stay in front of the supplied ones, so a
+  rules file can add coverage but never shadow a system-critical path
 - Cancel a running scan from the desktop app
 - `diskern scan` prints the findings themselves — grouped by verdict and
   category, with `--top` to cap each group and `--verdict` to filter
@@ -59,6 +64,11 @@ All notable changes to Diskern are documented here. The format follows
   cancelled scan can't leave it emitting for the rest of the process
 - Two files that flatten to the same quarantine name no longer overwrite
   each other
+- Purging an empty quarantine is a no-op rather than an error
+- A directory holding two project markers (`Cargo.toml` and
+  `package.json`, say) is recognised as both kinds rather than whichever
+  the walk happened to see last, which had made the verdict on its build
+  output depend on walk order
 
 ## [0.1.0]
 
