@@ -311,9 +311,21 @@ mod tests {
     /// An absolute root is already what the rules expect and must survive
     /// untouched — in particular `/var/tmp` must not become the symlink
     /// target `/private/var/tmp` that `canonicalize` would produce on macOS.
+    #[cfg(unix)]
     #[test]
     fn an_absolute_root_is_left_alone() {
         let root = Path::new("/var/tmp");
+        assert_eq!(absolute_root(root).unwrap(), root);
+    }
+
+    /// The same guarantee on Windows, where it needs a different path to
+    /// state. `/var/tmp` is not absolute there — it is rooted but has no
+    /// drive, so `absolute` resolves it against the current one, which is
+    /// the right answer and not the one this test is about.
+    #[cfg(windows)]
+    #[test]
+    fn an_absolute_root_is_left_alone() {
+        let root = Path::new(r"C:\Users\example\AppData\Local\Temp");
         assert_eq!(absolute_root(root).unwrap(), root);
     }
 
