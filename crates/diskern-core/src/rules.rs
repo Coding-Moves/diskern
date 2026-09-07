@@ -11,7 +11,7 @@
 //! anchoring is the point: a plain substring test made `/tmp/` fire on
 //! `/home/user/tmp/tax-return.pdf`, which is user data, not scratch space.
 
-use crate::{Category, Verdict};
+use crate::{Category, GenomeError, Result, Verdict};
 use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
@@ -73,6 +73,47 @@ impl RulesDb {
             rules,
             matchers: OnceLock::new(),
         }
+    }
+
+    /// Reject malformed patterns before an externally supplied database is
+    /// used. `compile` remains tolerant for the embedded matcher path, but a
+    /// caller loading rules from outside the binary must not report success
+    /// for a rule that can never match.
+    pub fn validate(&self) -> Result<()> {
+        for rule in &self.rules {
+            // An empty pattern list compiles cleanly into a GlobSet that
+            // matches nothing, so it fails the same way a bad glob does —
+            // silently, and only for the rule the author cared about.
+            if rule.patterns.is_empty() {
+                return Err(GenomeError::Rules(format!(
+                    "rule '{}' has no patterns, so it can never match",
+                    rule.id
+                )));
+            }
+            for pattern in &rule.patterns {
+                build_glob(pattern).map_err(|error| {
+                    GenomeError::Rules(format!(
+                        "rule '{}' has invalid glob pattern '{}': {error}",
+                        rule.id, pattern
+                    ))
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Put the embedded protected rules ahead of an externally supplied
+    /// database. First-match-wins makes this ordering a safety boundary:
+    /// custom rules may add coverage, but cannot shadow the system-critical
+    /// rules shipped with the application.
+    pub fn with_embedded_protected_rules(self) -> Self {
+        let mut rules = RulesDb::embedded()
+            .rules
+            .into_iter()
+            .filter(|rule| rule.verdict == Verdict::Protected)
+            .collect::<Vec<_>>();
+        rules.extend(self.rules);
+        Self::new(self.version, rules)
     }
 
     /// First matching rule wins; order in the db is priority order.
@@ -222,6 +263,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn invalid_patterns_are_rejected_before_external_use() {
+        let db = RulesDb::new(
+            1,
+            vec![Rule {
+                id: "broken".into(),
+                patterns: vec!["[".into()],
+                category: Category::Unknown,
+                verdict: Verdict::Review,
+                description: "invalid test rule".into(),
+            }],
+        );
+
+        let error = db
+            .validate()
+            .expect_err("invalid glob must fail validation");
+        assert!(error.to_string().contains("broken"));
+        assert!(error.to_string().contains("invalid glob pattern"));
+    }
+
+    #[test]
+    fn rules_without_patterns_are_rejected() {
+        let db = RulesDb::new(
+            1,
+            vec![Rule {
+                id: "empty".into(),
+                patterns: vec![],
+                category: Category::Unknown,
+                verdict: Verdict::Review,
+                description: "rule with no patterns".into(),
+            }],
+        );
+
+        let error = db
+            .validate()
+            .expect_err("a rule with no patterns must fail validation");
+        assert!(error.to_string().contains("empty"));
+        assert!(error.to_string().contains("can never match"));
+    }
+
+    #[test]
+    fn embedded_protected_rules_precede_external_rules() {
+        let external = RulesDb::new(
+            1,
+            vec![Rule {
+                id: "unsafe-override".into(),
+                patterns: vec!["**/*.msi".into()],
+                category: Category::Installer,
+                verdict: Verdict::Safe,
+                description: "must not shadow protected rules".into(),
+            }],
+        )
+        .with_embedded_protected_rules();
+
+        let (category, verdict, rule) =
+            external.classify(std::path::Path::new("/tmp/windows/installer/setup.msi"));
+        assert_eq!(category, Category::SystemCritical);
+        assert_eq!(verdict, Verdict::Protected);
+        assert_eq!(
+            rule.map(|rule| rule.id.as_str()),
+            Some("windows-installer-cache")
+        );
+    }
+
     /// Issue #41. Under substring matching every one of these matched a
     /// rule written for somewhere else on the disk, and `review` is an
     /// actionable verdict — the app offered to move them.
@@ -272,6 +377,7 @@ mod tests {
             "/home/u/.cache/google-chrome/Default/Cache/data_0",
             "C:\\Users\\x\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache\\data_0",
             "/Users/x/Library/Caches/Google/Chrome/Default/Cache/data_0",
+            "/Users/x/Library/Caches/Google/Chrome/Default/Code Cache/js/index",
         ] {
             let (cat, verdict, rule) = db.classify(std::path::Path::new(path));
             assert_eq!(cat, Category::BrowserCache, "{path} matched {rule:?}");

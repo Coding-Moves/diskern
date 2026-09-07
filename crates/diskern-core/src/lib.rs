@@ -107,6 +107,8 @@ pub enum GenomeError {
         #[source]
         source: std::io::Error,
     },
+    #[error("scan root {path} is inside excluded directory {exclude}")]
+    ExcludedRoot { path: PathBuf, exclude: String },
     #[error("scan cancelled")]
     Cancelled,
     #[error("rules database error: {0}")]

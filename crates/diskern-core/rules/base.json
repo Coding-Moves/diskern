@@ -24,7 +24,7 @@
     },
     {
       "id": "chrome-cache",
-      "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**", "**/library/caches/google/chrome/*/cache/**"],
+      "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**", "**/library/caches/google/chrome/*/cache/**", "**/library/caches/google/chrome/*/code cache/**"],
       "category": "browser_cache",
       "verdict": "safe",
       "description": "Chrome browser cache. Fully regenerated on next use; no effect on installed applications or saved data."
