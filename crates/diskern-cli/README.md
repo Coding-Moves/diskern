@@ -53,6 +53,7 @@ nothing will offer to move it.
 | `--top N`   | `5`     | Findings shown per category; `0` shows every one.       |
 | `--verdict` | all     | `safe`, `review`, `risky` or `protected`. Duplicate sets have no verdict, so they are omitted when this is set. |
 | `--json`    | off     | Full report as JSON; the flags above don't apply.        |
+| `--rules <file>` | embedded | Load and validate an external rules database; embedded protected rules remain authoritative. |
 
 Scanning is always read-only — the CLI never modifies, moves, or deletes
 anything.

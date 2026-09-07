@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use diskern_core::{report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
@@ -29,6 +29,9 @@ enum Command {
         /// Only show findings with this verdict
         #[arg(long, value_enum)]
         verdict: Option<VerdictFilter>,
+        /// Load rules from a JSON file; embedded protected rules still apply
+        #[arg(long, value_name = "FILE")]
+        rules: Option<PathBuf>,
     },
 }
 
@@ -70,6 +73,15 @@ fn human_bytes(n: u64) -> String {
         format!("{n} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Suffix for English pluralization: empty for 1, "s" for any other count.
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
     }
 }
 
@@ -143,7 +155,7 @@ fn print_findings(findings: &[&Finding], top: usize) {
             "{} — {} finding{} · {}",
             verdict_label(verdict),
             group.len(),
-            if group.len() == 1 { "" } else { "s" },
+            plural(group.len()),
             human_bytes(total)
         );
 
@@ -183,6 +195,28 @@ fn print_findings(findings: &[&Finding], top: usize) {
     }
 }
 
+fn load_rules(path: Option<&std::path::Path>) -> Result<RulesDb> {
+    let Some(path) = path else {
+        return Ok(RulesDb::embedded());
+    };
+
+    let contents = std::fs::read(path).with_context(|| {
+        format!(
+            "could not read rules file '{}'; check that it exists and is readable",
+            path.display()
+        )
+    })?;
+    let rules: RulesDb = serde_json::from_slice(&contents)
+        .with_context(|| format!("could not parse rules file '{}' as JSON", path.display()))?;
+    rules.validate().with_context(|| {
+        format!(
+            "could not validate rules file '{}'; every pattern must be a valid glob",
+            path.display()
+        )
+    })?;
+    Ok(rules.with_embedded_protected_rules())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -191,24 +225,35 @@ fn main() -> Result<()> {
             json,
             top,
             verdict,
+            rules,
         } => {
+            let external_rules = rules.as_deref();
+            let rules_db = load_rules(external_rules)?;
             let opts = scanner::ScanOptions {
                 roots,
                 ..Default::default()
             };
             let progress = Arc::new(scanner::ScanProgress::default());
             let entries = scanner::scan(&opts, progress)?;
-            let report = report::build(entries, &RulesDb::embedded());
+            let report = report::build(entries, &rules_db);
 
             if json {
+                if let Some(path) = external_rules {
+                    eprintln!("Using external rules database: {}", path.display());
+                }
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("Scanned {} files.", report.files_scanned);
+                if let Some(path) = external_rules {
+                    println!("Rules: external database — {}", path.display());
+                }
                 println!(
-                    "Reclaimable: {} across {} findings and {} duplicate sets.",
+                    "Reclaimable: {} across {} finding{} and {} duplicate set{}.",
                     human_bytes(report.total_reclaimable),
                     report.findings.len(),
-                    report.duplicate_sets.len()
+                    plural(report.findings.len()),
+                    report.duplicate_sets.len(),
+                    plural(report.duplicate_sets.len())
                 );
                 // Filter after the summary line, so the headline totals
                 // still describe the whole scan rather than the slice.
@@ -226,8 +271,9 @@ fn main() -> Result<()> {
                     let wasted: u64 = report.duplicate_sets.iter().map(|d| d.wasted).sum();
                     println!();
                     println!(
-                        "Duplicate files — {} sets · {} wasted",
+                        "Duplicate files — {} set{} · {} wasted",
                         report.duplicate_sets.len(),
+                        plural(report.duplicate_sets.len()),
                         human_bytes(wasted)
                     );
                     let dup_shown = if top == 0 {
@@ -259,7 +305,15 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::human_bytes;
+    use super::{human_bytes, plural};
+
+    #[test]
+    fn plural_returns_empty_only_for_singular() {
+        assert_eq!(plural(0), "s");
+        assert_eq!(plural(1), "");
+        assert_eq!(plural(2), "s");
+        assert_eq!(plural(10), "s");
+    }
 
     #[test]
     fn scales_to_a_readable_unit() {
