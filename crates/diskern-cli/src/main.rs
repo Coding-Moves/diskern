@@ -29,7 +29,7 @@ enum Command {
         /// Only show findings with this verdict
         #[arg(long, value_enum)]
         verdict: Option<VerdictFilter>,
-        /// Load rules from a JSON file instead of the embedded database
+        /// Load rules from a JSON file; embedded protected rules still apply
         #[arg(long, value_name = "FILE")]
         rules: Option<PathBuf>,
     },
