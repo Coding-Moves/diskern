@@ -6,6 +6,12 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A relative scan root no longer hides every finding a root-anchored rule
+  would have made. `diskern scan tmp` from `/var` reported nothing to
+  clean; roots are resolved to absolute paths before the walk
+
 ## [0.2.0] — 2026-09-07
 
 ### Added
