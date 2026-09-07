@@ -3,6 +3,13 @@
 //! matches. Driving the real binary with a working directory is the only
 //! honest way to pin this: changing the current directory inside a test would
 //! race every other test in the same binary.
+//!
+//! Unix only, and gated at the module level so the imports go with it:
+//! Windows paths normalize to `c:/...`, so a `/`-anchored pattern cannot
+//! match there and neither can the bug. Gating each item instead left these
+//! imports unused on Windows, which is four errors under the `-D warnings`
+//! clippy run CONTRIBUTING asks for.
+#![cfg(unix)]
 
 use serde_json::json;
 use std::fs;
@@ -10,9 +17,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 /// A rule anchored at the filesystem root, like the shipped `/tmp/**` and
-/// `/var/log/**`. Windows paths normalize to `c:/...`, so a `/`-anchored
-/// pattern cannot match there and neither can the bug.
-#[cfg(unix)]
+/// `/var/log/**`.
 fn write_anchored_rules(path: &std::path::Path) {
     let rules = json!({
         "version": 1,
@@ -27,7 +32,6 @@ fn write_anchored_rules(path: &std::path::Path) {
     fs::write(path, serde_json::to_vec(&rules).unwrap()).unwrap();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_relative_root_still_reaches_anchored_rules() {
     let root = tempdir().unwrap();
@@ -53,7 +57,6 @@ fn a_relative_root_still_reaches_anchored_rules() {
     assert!(stdout.contains("/scratch.marker"), "{stdout}");
 }
 
-#[cfg(unix)]
 #[test]
 fn an_absolute_root_reaches_the_same_rule() {
     let root = tempdir().unwrap();
