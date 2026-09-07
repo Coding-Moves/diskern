@@ -76,6 +76,15 @@ fn human_bytes(n: u64) -> String {
     }
 }
 
+/// Suffix for English pluralization: empty for 1, "s" for any other count.
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
 /// Display strings live in the CLI, not in diskern-core — the engine is
 /// deliberately UI-agnostic. These mirror the labels the desktop app uses
 /// so the two front ends describe the same finding the same way.
@@ -146,7 +155,7 @@ fn print_findings(findings: &[&Finding], top: usize) {
             "{} — {} finding{} · {}",
             verdict_label(verdict),
             group.len(),
-            if group.len() == 1 { "" } else { "s" },
+            plural(group.len()),
             human_bytes(total)
         );
 
@@ -239,10 +248,12 @@ fn main() -> Result<()> {
                     println!("Rules: external database — {}", path.display());
                 }
                 println!(
-                    "Reclaimable: {} across {} findings and {} duplicate sets.",
+                    "Reclaimable: {} across {} finding{} and {} duplicate set{}.",
                     human_bytes(report.total_reclaimable),
                     report.findings.len(),
-                    report.duplicate_sets.len()
+                    plural(report.findings.len()),
+                    report.duplicate_sets.len(),
+                    plural(report.duplicate_sets.len())
                 );
                 // Filter after the summary line, so the headline totals
                 // still describe the whole scan rather than the slice.
@@ -260,8 +271,9 @@ fn main() -> Result<()> {
                     let wasted: u64 = report.duplicate_sets.iter().map(|d| d.wasted).sum();
                     println!();
                     println!(
-                        "Duplicate files — {} sets · {} wasted",
+                        "Duplicate files — {} set{} · {} wasted",
                         report.duplicate_sets.len(),
+                        plural(report.duplicate_sets.len()),
                         human_bytes(wasted)
                     );
                     let dup_shown = if top == 0 {
@@ -293,7 +305,15 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::human_bytes;
+    use super::{human_bytes, plural};
+
+    #[test]
+    fn plural_returns_empty_only_for_singular() {
+        assert_eq!(plural(0), "s");
+        assert_eq!(plural(1), "");
+        assert_eq!(plural(2), "s");
+        assert_eq!(plural(10), "s");
+    }
 
     #[test]
     fn scales_to_a_readable_unit() {
