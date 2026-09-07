@@ -9,6 +9,12 @@ Diskern scans your computer, understands what every file is *for*, and
 safely frees up space — explaining exactly what's safe to remove and what
 would break if you did.
 
+![diskern scan grouping findings by verdict, each with the rule that matched and the evidence behind it](docs/images/cli-scan.png)
+
+Findings are grouped by verdict, and every row carries the rule that
+matched it. `0 B` on the risky rows is deliberate: bytes on files nothing
+will offer to move don't count toward the reclaimable total.
+
 ## Principles (non-negotiable)
 
 1. **Read-only by default.** Scanning never modifies anything.
