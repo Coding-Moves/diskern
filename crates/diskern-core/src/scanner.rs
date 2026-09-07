@@ -68,9 +68,33 @@ pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileE
         if progress.cancelled.load(Ordering::Relaxed) {
             return Err(crate::GenomeError::Cancelled);
         }
-        walk_root(root, opts, &progress, &mut out)?;
+        walk_root(&absolute_root(root)?, opts, &progress, &mut out)?;
     }
     Ok(out)
+}
+
+/// Issue #103. The rules are written against absolute paths, and the ones
+/// anchored at the filesystem root — `/tmp/**`, `/var/log/**` — are anchored
+/// on purpose: that is what keeps `/tmp` out of `~/tmp`. `jwalk` builds every
+/// entry's path from the root as it was handed in, so `diskern scan tmp` from
+/// `/var` produced `tmp/systemd-private/x`, which no anchored pattern can
+/// match. The walk found the files and the rules could not tell where they
+/// were, so the scan reported nothing to clean.
+///
+/// `absolute`, not `canonicalize`: it touches no filesystem, works on a path
+/// that does not exist, and leaves symlinks alone. `canonicalize` would
+/// rewrite `/var/tmp` to `/private/var/tmp` on macOS, scanning somewhere
+/// other than what was asked for.
+///
+/// It resolves a leading `.` but leaves `..` in place, since `a/../b` is only
+/// `b` when `a` isn't a symlink. A root spelled with `..` therefore still
+/// misses anchored rules; making it absolute is what the rules need, and
+/// guessing past a symlink is not.
+fn absolute_root(root: &Path) -> Result<PathBuf> {
+    std::path::absolute(root).map_err(|source| crate::GenomeError::Io {
+        path: root.to_path_buf(),
+        source,
+    })
 }
 
 fn walk_root(
@@ -273,6 +297,24 @@ mod tests {
             entries[0].path.file_name().unwrap().to_string_lossy(),
             "keep.txt"
         );
+    }
+
+    /// Issue #103. Anchored rules only match absolute paths, so a relative
+    /// root has to be resolved before the walk, not after.
+    #[test]
+    fn a_relative_root_is_made_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(absolute_root(Path::new("tmp")).unwrap(), cwd.join("tmp"));
+        assert_eq!(absolute_root(Path::new(".")).unwrap(), cwd);
+    }
+
+    /// An absolute root is already what the rules expect and must survive
+    /// untouched — in particular `/var/tmp` must not become the symlink
+    /// target `/private/var/tmp` that `canonicalize` would produce on macOS.
+    #[test]
+    fn an_absolute_root_is_left_alone() {
+        let root = Path::new("/var/tmp");
+        assert_eq!(absolute_root(root).unwrap(), root);
     }
 
     #[test]
