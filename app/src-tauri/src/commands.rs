@@ -19,6 +19,7 @@ pub struct ScanAuthority(Mutex<AuthorityState>);
 struct AuthorityState {
     next_generation: u64,
     active: Option<ActiveGeneration>,
+    cancelled_generation: Option<u64>,
     report: Option<CompletedReport>,
     epoch: Arc<AtomicU64>,
 }
@@ -37,6 +38,13 @@ struct ActionLease {
     generation: u64,
     report: Arc<report::Report>,
     epoch: Arc<AtomicU64>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PublishOutcome {
+    Published,
+    Cancelled,
+    Superseded,
 }
 
 impl ActionLease {
@@ -60,6 +68,7 @@ impl ScanAuthority {
         state.next_generation = state.next_generation.wrapping_add(1);
         let generation = state.next_generation;
         state.epoch.store(generation, Ordering::Release);
+        state.cancelled_generation = None;
         state.report = None;
         state.active = Some(ActiveGeneration {
             generation,
@@ -68,7 +77,7 @@ impl ScanAuthority {
         generation
     }
 
-    fn publish(&self, generation: u64, report: report::Report) -> bool {
+    fn publish(&self, generation: u64, report: report::Report) -> PublishOutcome {
         let mut state = self.slot();
         if state
             .active
@@ -81,9 +90,13 @@ impl ScanAuthority {
                 report: Arc::new(report),
             });
             state.active = None;
-            true
+            state.cancelled_generation = None;
+            PublishOutcome::Published
+        } else if state.cancelled_generation == Some(generation) {
+            state.cancelled_generation = None;
+            PublishOutcome::Cancelled
         } else {
-            false
+            PublishOutcome::Superseded
         }
     }
 
@@ -96,6 +109,9 @@ impl ScanAuthority {
         {
             state.active = None;
             state.report = None;
+        }
+        if state.cancelled_generation == Some(generation) {
+            state.cancelled_generation = None;
         }
     }
 
@@ -115,6 +131,7 @@ impl ScanAuthority {
         let Some(active) = state.active.take() else {
             return false;
         };
+        state.cancelled_generation = Some(active.generation);
         active.progress.cancel();
         state
             .epoch
@@ -267,13 +284,11 @@ pub async fn start_scan(
 
     let joined = joined.map_err(|e| e.to_string())?;
     let result = match joined {
-        Ok(Some(report)) => {
-            if authority.publish(generation, report.clone()) {
-                Ok(Some(report))
-            } else {
-                Err("scan was superseded by a newer scan".to_string())
-            }
-        }
+        Ok(Some(report)) => match authority.publish(generation, report.clone()) {
+            PublishOutcome::Published => Ok(Some(report)),
+            PublishOutcome::Cancelled => Ok(None),
+            PublishOutcome::Superseded => Err("scan was superseded by a newer scan".to_string()),
+        },
         Ok(None) => {
             authority.abandon(generation);
             Ok(None)
@@ -454,9 +469,51 @@ mod tests {
         let second = authority.begin(second_progress);
 
         assert!(first_progress.cancelled.load(Ordering::Acquire));
-        assert!(!authority.publish(first, empty_report()));
-        assert!(authority.publish(second, empty_report()));
+        assert_eq!(
+            authority.publish(first, empty_report()),
+            PublishOutcome::Superseded
+        );
+        assert_eq!(
+            authority.publish(second, empty_report()),
+            PublishOutcome::Published
+        );
         assert!(authority.lease().is_some());
+    }
+
+    #[test]
+    fn cancellation_completion_race_returns_the_cancellation_outcome() {
+        let authority = ScanAuthority::default();
+        let progress = Arc::new(scanner::ScanProgress::default());
+        let generation = authority.begin(progress.clone());
+
+        // The walk may finish and return a report after cancel() has revoked
+        // the active slot but before it observes the cancellation flag.
+        assert!(authority.cancel());
+        assert_eq!(
+            authority.publish(generation, empty_report()),
+            PublishOutcome::Cancelled
+        );
+        assert!(progress.cancelled.load(Ordering::Acquire));
+        assert!(authority.lease().is_none());
+    }
+
+    #[test]
+    fn a_new_generation_makes_an_old_completion_a_supersede() {
+        let authority = ScanAuthority::default();
+        let first = authority.begin(Arc::new(scanner::ScanProgress::default()));
+        assert!(authority.cancel());
+        let second = authority.begin(Arc::new(scanner::ScanProgress::default()));
+
+        // The cancellation marker is generation-scoped. Once a new scan
+        // begins, a late completion from the old one is a real supersede.
+        assert_eq!(
+            authority.publish(first, empty_report()),
+            PublishOutcome::Superseded
+        );
+        assert_eq!(
+            authority.publish(second, empty_report()),
+            PublishOutcome::Published
+        );
     }
 
     #[test]
@@ -478,7 +535,10 @@ mod tests {
         std::fs::write(&target, b"cache").unwrap();
         let authority = ScanAuthority::default();
         let generation = authority.begin(Arc::new(scanner::ScanProgress::default()));
-        authority.publish(generation, report_for(&target, Verdict::Review));
+        assert_eq!(
+            authority.publish(generation, report_for(&target, Verdict::Review)),
+            PublishOutcome::Published
+        );
         let lease = authority.lease().unwrap();
 
         authority.begin(Arc::new(scanner::ScanProgress::default()));
@@ -502,7 +562,10 @@ mod tests {
         std::fs::write(&target, b"keep").unwrap();
         let authority = ScanAuthority::default();
         let generation = authority.begin(Arc::new(scanner::ScanProgress::default()));
-        authority.publish(generation, report_for(&target, Verdict::Risky));
+        assert_eq!(
+            authority.publish(generation, report_for(&target, Verdict::Risky)),
+            PublishOutcome::Published
+        );
 
         let result = quarantine_from_authoritative(&authority, &target, &quarantine_dir);
         assert!(result.is_err());
