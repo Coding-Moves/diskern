@@ -334,8 +334,11 @@ mod tests {
     fn rules_do_not_reach_outside_the_paths_they_name() {
         let db = RulesDb::embedded();
         for path in [
-            "/home/user/tmp/tax-return.pdf",     // not /tmp
-            "/home/user/var/log/notes.txt",      // not /var/log
+            "/home/user/tmp/tax-return.pdf", // not /tmp
+            "/home/user/var/log/notes.txt",  // not /var/log
+            "/home/user/var/tmp/notes.txt",  // not /var/tmp
+            "/home/user/project/var/tmp/session.dat",
+            "/opt/homebrew/var/tmp/formula.lock",
             "/home/user/Downloads/holiday.dmgx", // not a .dmg
             "/home/user/mytmp/scratch.bin",
         ] {
@@ -351,6 +354,7 @@ mod tests {
         for (path, expected) in [
             ("/tmp/build-9a2f/out.o", Category::TempFile),
             ("/var/tmp/systemd-private/x", Category::TempFile),
+            ("/private/var/tmp/com.apple.launchd/x", Category::TempFile),
             (
                 "C:\\Users\\x\\AppData\\Local\\Temp\\a.tmp",
                 Category::TempFile,
