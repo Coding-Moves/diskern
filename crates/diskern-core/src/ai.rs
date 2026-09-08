@@ -8,7 +8,7 @@
 //! - `AnthropicProvider` / `OpenAiProvider`: user pastes their own API key.
 //! - `OllamaProvider`: local models via http://localhost:11434.
 
-use crate::Finding;
+use crate::{human_bytes, Finding};
 
 pub trait AiProvider: Send + Sync {
     /// Turn a set of findings into a short, plain-language explanation.
@@ -32,9 +32,9 @@ impl AiProvider for TemplateNarrator {
     fn narrate(&self, findings: &[Finding]) -> Result<String, AiError> {
         let total: u64 = findings.iter().map(|f| f.reclaimable).sum();
         Ok(format!(
-            "Found {} items totalling {:.1} GB reclaimable. Top reasons: {}",
+            "Found {} items totalling {} reclaimable. Top reasons: {}",
             findings.len(),
-            total as f64 / 1e9,
+            human_bytes(total),
             findings
                 .iter()
                 .take(3)
@@ -42,5 +42,58 @@ impl AiProvider for TemplateNarrator {
                 .collect::<Vec<_>>()
                 .join("; ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Category, FileEntry, Verdict};
+    use std::path::PathBuf;
+
+    fn sample_finding(path: &str, reclaimable: u64, reason: &str) -> Finding {
+        Finding {
+            entry: FileEntry {
+                path: PathBuf::from(path),
+                size: reclaimable,
+                modified: None,
+                accessed: None,
+                is_symlink: false,
+                hash: None,
+            },
+            category: Category::BrowserCache,
+            verdict: Verdict::Safe,
+            risk_score: 0.1,
+            reasons: vec![reason.to_string()],
+            reclaimable,
+        }
+    }
+
+    #[test]
+    fn template_narrator_narrates_facts_and_formats_bytes() {
+        let findings = vec![
+            sample_finding("/cache/a", 50_000_000, "chrome cache expired"),
+            sample_finding("/cache/b", 30_000_000, "firefox cache expired"),
+            sample_finding("/cache/c", 20_000_000, "safari cache expired"),
+            sample_finding("/cache/d", 10_000_000, "edge cache expired"),
+        ];
+
+        let narrator = TemplateNarrator;
+        let narrative = narrator.narrate(&findings).unwrap();
+
+        assert_eq!(
+            narrative,
+            "Found 4 items totalling 110.0 MB reclaimable. Top reasons: chrome cache expired; firefox cache expired; safari cache expired"
+        );
+    }
+
+    #[test]
+    fn template_narrator_empty_findings() {
+        let narrator = TemplateNarrator;
+        let narrative = narrator.narrate(&[]).unwrap();
+        assert_eq!(
+            narrative,
+            "Found 0 items totalling 0 B reclaimable. Top reasons: "
+        );
     }
 }
