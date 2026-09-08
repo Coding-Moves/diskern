@@ -71,10 +71,20 @@ an informational score and per-file evidence, and each entry becomes a
 and adds only the duplicate copies nothing has counted yet.
 
 Acting on a finding is a separate call:
-[`actions::quarantine`](../crates/diskern-core/src/actions.rs) is the
-only function in the crate that writes, it refuses `Risky` and
-`Protected`, and it records every move in a manifest so a restore
-survives the process exiting.
+[`actions::quarantine_finding`](../crates/diskern-core/src/actions.rs) is the
+report-bound safety entry point. It looks up an exact path in the completed
+report, combines the report's graph-aware verdict with a fresh static-rule
+verdict by taking the stricter result, checks the report's size, modification
+time and symlink state without using access time, and then delegates to
+[`actions::quarantine`](../crates/diskern-core/src/actions.rs). Missing or
+changed findings fail closed. The desktop backend invalidates the report when
+a newer scan starts, and a generation lease prevents a superseded scan from
+publishing or continuing an action. A completed report is a user-review
+snapshot: filesystem graph changes made without a new scan are not silently
+treated as a new report, so the user must scan again before relying on them.
+The final path-based move still has an ordinary OS-level TOCTOU window; the
+metadata check is a bounded stale-report defense, not a universal filesystem
+identity proof.
 
 ## Adding a feature
 

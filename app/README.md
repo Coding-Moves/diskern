@@ -30,7 +30,7 @@ a live file counter.
 | --- | --- |
 | `start_scan` | Read-only scan; returns a report, or `null` if cancelled |
 | `cancel_scan` | Stops the scan in flight |
-| `quarantine_finding` | Moves one file to quarantine, re-classifying server-side first |
+| `quarantine_finding` | Moves one exact report finding to quarantine; the backend owns the verdict and rejects stale or superseded report state |
 | `list_quarantine` | Everything currently quarantined, read from the manifest |
 | `restore_quarantined` | Puts one file back where it came from |
 | `purge_quarantine` | Empties quarantine for good — the only deletion in the app |
@@ -38,7 +38,9 @@ a live file counter.
 Everything except `quarantine_finding` and `purge_quarantine` is
 read-only. Quarantine is manifest-backed, so what was moved in one
 session is still restorable in the next; the Quarantine panel renders
-before any scan has been run for exactly that reason.
+before any scan has been run for exactly that reason. A completed scan is the
+user-review snapshot for quarantine: starting or cancelling another scan
+invalidates that snapshot, and a new scan is required before acting again.
 
 ## Updater
 

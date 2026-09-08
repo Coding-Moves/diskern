@@ -6,6 +6,12 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Desktop quarantine now uses the exact finding from the completed backend
+  report, with graph-aware verdicts, generation-scoped report authority and
+  fail-closed stale-finding checks; frontend verdict values are never trusted
+
 ### Fixed
 
 - The system temp rule no longer reaches user and project `var/tmp` directories

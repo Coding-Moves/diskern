@@ -1,29 +1,156 @@
-use diskern_core::{actions, report, rules::RulesDb, scanner, GenomeError, Verdict};
+use diskern_core::{actions, report, rules::RulesDb, scanner, GenomeError};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tauri::{Emitter, State, Window};
 
-/// Handle on the scan that is running right now, if any.
+/// Backend-owned scan/report authority.
 ///
-/// The engine has always supported cancellation — `ScanProgress` carries the
-/// flag and the walk checks it on every entry — but `start_scan` created its
-/// `ScanProgress` as a local, so nothing outside that one call could ever
-/// reach it. This is the shared slot that makes it reachable.
+/// A completed report is a review snapshot. Starting or cancelling a scan
+/// invalidates the previous snapshot, and only the scan that owns the current
+/// generation may publish. The mutex protects short state transitions only;
+/// filesystem scanning and quarantine I/O happen outside it.
 #[derive(Default)]
-pub struct ActiveScan(Mutex<Option<Arc<scanner::ScanProgress>>>);
+pub struct ScanAuthority(Mutex<AuthorityState>);
 
-impl ActiveScan {
-    /// A poisoned lock means some earlier holder panicked while swapping an
-    /// `Option`. There is no invariant here worth protecting, and refusing
-    /// to unlock would leave cancellation permanently broken for the rest of
-    /// the session — so recover the value instead.
-    fn slot(&self) -> MutexGuard<'_, Option<Arc<scanner::ScanProgress>>> {
+#[derive(Default)]
+struct AuthorityState {
+    next_generation: u64,
+    active: Option<ActiveGeneration>,
+    cancelled_generation: Option<u64>,
+    report: Option<CompletedReport>,
+    epoch: Arc<AtomicU64>,
+}
+
+struct ActiveGeneration {
+    generation: u64,
+    progress: Arc<scanner::ScanProgress>,
+}
+
+struct CompletedReport {
+    generation: u64,
+    report: Arc<report::Report>,
+}
+
+struct ActionLease {
+    generation: u64,
+    report: Arc<report::Report>,
+    epoch: Arc<AtomicU64>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PublishOutcome {
+    Published,
+    Cancelled,
+    Superseded,
+}
+
+impl ActionLease {
+    fn is_current(&self) -> bool {
+        self.epoch.load(Ordering::Acquire) == self.generation
+    }
+}
+
+impl ScanAuthority {
+    fn slot(&self) -> MutexGuard<'_, AuthorityState> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn begin(&self, progress: Arc<scanner::ScanProgress>) -> u64 {
+        let mut state = self.slot();
+        if let Some(previous) = state.active.take() {
+            previous.progress.cancel();
+        }
+        state.next_generation = state.next_generation.wrapping_add(1);
+        let generation = state.next_generation;
+        state.epoch.store(generation, Ordering::Release);
+        state.cancelled_generation = None;
+        state.report = None;
+        state.active = Some(ActiveGeneration {
+            generation,
+            progress,
+        });
+        generation
+    }
+
+    fn publish(&self, generation: u64, report: report::Report) -> PublishOutcome {
+        let mut state = self.slot();
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|active| active.generation == generation)
+            && state.epoch.load(Ordering::Acquire) == generation
+        {
+            state.report = Some(CompletedReport {
+                generation,
+                report: Arc::new(report),
+            });
+            state.active = None;
+            state.cancelled_generation = None;
+            PublishOutcome::Published
+        } else if state.cancelled_generation == Some(generation) {
+            state.cancelled_generation = None;
+            PublishOutcome::Cancelled
+        } else {
+            PublishOutcome::Superseded
+        }
+    }
+
+    fn abandon(&self, generation: u64) {
+        let mut state = self.slot();
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|active| active.generation == generation)
+        {
+            state.active = None;
+            state.report = None;
+        }
+        if state.cancelled_generation == Some(generation) {
+            state.cancelled_generation = None;
+        }
+    }
+
+    fn finish_active(&self, generation: u64) {
+        let mut state = self.slot();
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|active| active.generation == generation)
+        {
+            state.active = None;
+        }
+    }
+
+    fn cancel(&self) -> bool {
+        let mut state = self.slot();
+        let Some(active) = state.active.take() else {
+            return false;
+        };
+        state.cancelled_generation = Some(active.generation);
+        active.progress.cancel();
+        state
+            .epoch
+            .store(active.generation.wrapping_add(1), Ordering::Release);
+        state.report = None;
+        true
+    }
+
+    fn lease(&self) -> Option<ActionLease> {
+        let state = self.slot();
+        if state.active.is_some() {
+            return None;
+        }
+        let completed = state.report.as_ref()?;
+        Some(ActionLease {
+            generation: completed.generation,
+            report: completed.report.clone(),
+            epoch: state.epoch.clone(),
+        })
     }
 }
 
@@ -35,7 +162,7 @@ struct ScanProgressPayload {
 
 /// Everything a running scan owns outside itself: the ticker thread that
 /// emits `scan-progress`, and this scan's entry in the shared
-/// [`ActiveScan`] slot. Both are released on drop.
+/// authority slot. Both are released on drop.
 ///
 /// They used to be released by statements after the `.await`, which only
 /// run if control reaches them. A `?` between the two — there was one —
@@ -46,12 +173,17 @@ struct ScanProgressPayload {
 struct ScanRun<'a> {
     stop: Arc<std::sync::atomic::AtomicBool>,
     ticker: Option<std::thread::JoinHandle<()>>,
-    state: &'a ActiveScan,
-    progress: Arc<scanner::ScanProgress>,
+    state: &'a ScanAuthority,
+    generation: u64,
 }
 
 impl<'a> ScanRun<'a> {
-    fn start(window: &Window, state: &'a ActiveScan, progress: Arc<scanner::ScanProgress>) -> Self {
+    fn start(
+        window: &Window,
+        state: &'a ScanAuthority,
+        generation: u64,
+        progress: Arc<scanner::ScanProgress>,
+    ) -> Self {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         // A plain OS thread keeps this independent of whatever async
@@ -76,7 +208,7 @@ impl<'a> ScanRun<'a> {
             stop,
             ticker: Some(ticker),
             state,
-            progress,
+            generation,
         }
     }
 }
@@ -88,17 +220,9 @@ impl Drop for ScanRun<'_> {
             let _ = ticker.join();
         }
 
-        // Clear only if the slot still holds *this* scan. An unconditional
-        // `= None` would let a short scan that started second erase a
-        // longer one's handle when it finished first, leaving the survivor
-        // with a Cancel button wired to nothing.
-        let mut slot = self.state.slot();
-        if slot
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &self.progress))
-        {
-            *slot = None;
-        }
+        // Clear only if the slot still belongs to this generation. A newer
+        // scan may already own it.
+        self.state.finish_active(self.generation);
     }
 }
 
@@ -115,18 +239,16 @@ impl Drop for ScanRun<'_> {
 #[tauri::command]
 pub async fn start_scan(
     window: Window,
-    state: State<'_, ActiveScan>,
+    state: State<'_, Arc<ScanAuthority>>,
     roots: Vec<PathBuf>,
 ) -> Result<Option<report::Report>, String> {
     let progress = Arc::new(scanner::ScanProgress::default());
-    // Publish the handle before the walk starts. The guard is a temporary
-    // here on purpose — holding it across the await below would make this
-    // future non-Send.
-    *state.slot() = Some(progress.clone());
+    let authority = state.inner().clone();
+    let generation = authority.begin(progress.clone());
 
     // Everything this scan has to undo, undone on the way out however the
     // way out happens.
-    let run = ScanRun::start(&window, &state, progress.clone());
+    let run = ScanRun::start(&window, &authority, generation, progress.clone());
 
     let progress_for_scan = progress.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
@@ -151,8 +273,6 @@ pub async fn start_scan(
     })
     .await;
 
-    drop(run);
-
     // One final snapshot so the UI's last-seen count matches the real total.
     let _ = window.emit(
         "scan-progress",
@@ -162,7 +282,24 @@ pub async fn start_scan(
         },
     );
 
-    joined.map_err(|e| e.to_string())?
+    let joined = joined.map_err(|e| e.to_string())?;
+    let result = match joined {
+        Ok(Some(report)) => match authority.publish(generation, report.clone()) {
+            PublishOutcome::Published => Ok(Some(report)),
+            PublishOutcome::Cancelled => Ok(None),
+            PublishOutcome::Superseded => Err("scan was superseded by a newer scan".to_string()),
+        },
+        Ok(None) => {
+            authority.abandon(generation);
+            Ok(None)
+        }
+        Err(error) => {
+            authority.abandon(generation);
+            Err(error)
+        }
+    };
+    drop(run);
+    result
 }
 
 /// Stop the scan that is currently running.
@@ -174,41 +311,49 @@ pub async fn start_scan(
 /// Read-only, like `start_scan`: setting the flag makes the walk return
 /// early. Nothing is written, moved, or deleted.
 #[tauri::command]
-pub fn cancel_scan(state: State<'_, ActiveScan>) -> bool {
-    match state.slot().as_ref() {
-        Some(progress) => {
-            progress.cancel();
-            true
-        }
-        None => false,
-    }
+pub fn cancel_scan(state: State<'_, Arc<ScanAuthority>>) -> bool {
+    state.cancel()
 }
 
-/// The mutating commands below all take `quarantine_dir` from the
-/// frontend, which resolves it to `<app local data>/Quarantine`. Nothing
-/// here trusts a verdict the frontend claims — `quarantine_finding`
-/// re-classifies, and the restore/purge commands only ever touch paths
-/// the manifest in that directory says Diskern put there itself.
-///
-/// Re-classifies server-side before acting — the frontend's claimed
-/// verdict is never trusted.
+/// The mutating commands below all take `quarantine_dir` from the frontend,
+/// which resolves it to `<app local data>/Quarantine`. Nothing here trusts a
+/// verdict the frontend claims: `quarantine_finding` takes only a path lookup
+/// key and obtains the finding from the current backend report lease. The
+/// report-bound core action then applies the graph-aware verdict and fresh
+/// static-rule tightening before moving anything.
 #[tauri::command]
 pub async fn quarantine_finding(
+    state: State<'_, Arc<ScanAuthority>>,
     path: PathBuf,
     quarantine_dir: PathBuf,
 ) -> Result<actions::QuarantineRecord, String> {
+    let authority = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (_, verdict, _) = RulesDb::embedded().classify(&path);
-        if matches!(verdict, Verdict::Protected | Verdict::Risky) {
-            return Err(format!(
-                "{} is classified {verdict:?}; action refused",
-                path.display()
-            ));
-        }
-        actions::quarantine(&path, verdict, &quarantine_dir).map_err(|e| e.to_string())
+        quarantine_from_authoritative(&authority, &path, &quarantine_dir)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn quarantine_from_authoritative(
+    authority: &ScanAuthority,
+    path: &std::path::Path,
+    quarantine_dir: &std::path::Path,
+) -> Result<actions::QuarantineRecord, String> {
+    let lease = authority.lease().ok_or_else(|| {
+        "no current completed scan report; refusing to quarantine — scan again".to_string()
+    })?;
+    if !lease.is_current() {
+        return Err("scan report was superseded; refusing to quarantine — scan again".into());
+    }
+    actions::quarantine_finding_with_authorization(
+        path,
+        &lease.report,
+        &RulesDb::embedded(),
+        quarantine_dir,
+        || lease.is_current(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Everything still in quarantine, read from the manifest on disk.
@@ -257,4 +402,173 @@ pub async fn purge_quarantine(quarantine_dir: PathBuf) -> Result<actions::PurgeS
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use diskern_core::{Category, FileEntry, Finding, Verdict};
+    use std::path::Path;
+
+    fn empty_report() -> report::Report {
+        report::Report {
+            findings: vec![],
+            duplicate_sets: vec![],
+            total_reclaimable: 0,
+            files_scanned: 0,
+        }
+    }
+
+    fn report_for(path: &Path, verdict: Verdict) -> report::Report {
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        let epoch = |time: std::time::SystemTime| {
+            time.duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        };
+        report::Report {
+            findings: vec![Finding {
+                entry: FileEntry {
+                    path: path.to_path_buf(),
+                    size: metadata.len(),
+                    modified: metadata.modified().ok().map(epoch),
+                    accessed: metadata.accessed().ok().map(epoch),
+                    is_symlink: metadata.file_type().is_symlink(),
+                    hash: None,
+                },
+                category: Category::TempFile,
+                verdict,
+                risk_score: 0.5,
+                reasons: vec!["backend test".into()],
+                reclaimable: metadata.len(),
+            }],
+            duplicate_sets: vec![],
+            total_reclaimable: metadata.len(),
+            files_scanned: 1,
+        }
+    }
+
+    #[test]
+    fn no_completed_report_fails_closed() {
+        let authority = ScanAuthority::default();
+        let error = quarantine_from_authoritative(
+            &authority,
+            Path::new("/not-in-a-report"),
+            Path::new("/not-created"),
+        )
+        .unwrap_err();
+        assert!(error.contains("no current completed scan report"));
+    }
+
+    #[test]
+    fn only_the_current_generation_can_publish() {
+        let authority = ScanAuthority::default();
+        let first_progress = Arc::new(scanner::ScanProgress::default());
+        let first = authority.begin(first_progress.clone());
+        let second_progress = Arc::new(scanner::ScanProgress::default());
+        let second = authority.begin(second_progress);
+
+        assert!(first_progress.cancelled.load(Ordering::Acquire));
+        assert_eq!(
+            authority.publish(first, empty_report()),
+            PublishOutcome::Superseded
+        );
+        assert_eq!(
+            authority.publish(second, empty_report()),
+            PublishOutcome::Published
+        );
+        assert!(authority.lease().is_some());
+    }
+
+    #[test]
+    fn cancellation_completion_race_returns_the_cancellation_outcome() {
+        let authority = ScanAuthority::default();
+        let progress = Arc::new(scanner::ScanProgress::default());
+        let generation = authority.begin(progress.clone());
+
+        // The walk may finish and return a report after cancel() has revoked
+        // the active slot but before it observes the cancellation flag.
+        assert!(authority.cancel());
+        assert_eq!(
+            authority.publish(generation, empty_report()),
+            PublishOutcome::Cancelled
+        );
+        assert!(progress.cancelled.load(Ordering::Acquire));
+        assert!(authority.lease().is_none());
+    }
+
+    #[test]
+    fn a_new_generation_makes_an_old_completion_a_supersede() {
+        let authority = ScanAuthority::default();
+        let first = authority.begin(Arc::new(scanner::ScanProgress::default()));
+        assert!(authority.cancel());
+        let second = authority.begin(Arc::new(scanner::ScanProgress::default()));
+
+        // The cancellation marker is generation-scoped. Once a new scan
+        // begins, a late completion from the old one is a real supersede.
+        assert_eq!(
+            authority.publish(first, empty_report()),
+            PublishOutcome::Superseded
+        );
+        assert_eq!(
+            authority.publish(second, empty_report()),
+            PublishOutcome::Published
+        );
+    }
+
+    #[test]
+    fn cancellation_invalidates_the_report_authority() {
+        let authority = ScanAuthority::default();
+        let progress = Arc::new(scanner::ScanProgress::default());
+        authority.begin(progress.clone());
+        assert!(authority.cancel());
+        assert!(progress.cancelled.load(Ordering::Acquire));
+        assert!(authority.lease().is_none());
+        assert!(!authority.cancel());
+    }
+
+    #[test]
+    fn an_invalidated_action_lease_cannot_move_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let quarantine_dir = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let authority = ScanAuthority::default();
+        let generation = authority.begin(Arc::new(scanner::ScanProgress::default()));
+        assert_eq!(
+            authority.publish(generation, report_for(&target, Verdict::Review)),
+            PublishOutcome::Published
+        );
+        let lease = authority.lease().unwrap();
+
+        authority.begin(Arc::new(scanner::ScanProgress::default()));
+        let result = actions::quarantine_finding_with_authorization(
+            &target,
+            &lease.report,
+            &RulesDb::embedded(),
+            &quarantine_dir,
+            || lease.is_current(),
+        );
+        assert!(result.is_err());
+        assert!(target.exists());
+        assert!(!quarantine_dir.exists());
+    }
+
+    #[test]
+    fn risky_report_is_refused_without_a_frontend_verdict() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dependency.bin");
+        let quarantine_dir = dir.path().join("quarantine");
+        std::fs::write(&target, b"keep").unwrap();
+        let authority = ScanAuthority::default();
+        let generation = authority.begin(Arc::new(scanner::ScanProgress::default()));
+        assert_eq!(
+            authority.publish(generation, report_for(&target, Verdict::Risky)),
+            PublishOutcome::Published
+        );
+
+        let result = quarantine_from_authoritative(&authority, &target, &quarantine_dir);
+        assert!(result.is_err());
+        assert!(target.exists());
+    }
 }
