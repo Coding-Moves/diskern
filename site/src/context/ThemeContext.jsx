@@ -1,4 +1,10 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 
 const ThemeContext = createContext(null)
 
@@ -12,6 +18,10 @@ const ThemeContext = createContext(null)
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState('dark')
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
   const value = useMemo(
     () => ({
       theme,
@@ -22,7 +32,7 @@ export function ThemeProvider({ children }) {
 
   return (
     <ThemeContext.Provider value={value}>
-      <div data-theme={theme}>{children}</div>
+      {children}
     </ThemeContext.Provider>
   )
 }

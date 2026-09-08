@@ -8,6 +8,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The landing page now applies its theme to the document root, preventing
+  light scrollbars, white overscroll areas, and a white flash before React loads
 - A relative scan root no longer hides every finding a root-anchored rule
   would have made. `diskern scan tmp` from `/var` reported nothing to
   clean; roots are resolved to absolute paths before the walk

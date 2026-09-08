@@ -16,6 +16,12 @@ npm run build   # outputs to dist/
 npm run preview # serve the production build locally
 ```
 
+## Test
+
+```sh
+npm test # regression checks for root theming and the initial page canvas
+```
+
 ## Deploy
 
 Pushing to `main` with changes under `site/` triggers

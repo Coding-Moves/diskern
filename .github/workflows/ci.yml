@@ -171,6 +171,7 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   # Desktop app frontend: Vite build only — no Tauri/webkitgtk needed,
