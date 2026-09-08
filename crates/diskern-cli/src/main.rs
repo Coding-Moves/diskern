@@ -220,7 +220,10 @@ fn load_rules(path: Option<&std::path::Path>) -> Result<RulesDb> {
 
 fn validate_roots(roots: &[PathBuf]) -> Result<()> {
     for root in roots {
-        if !root.try_exists()? {
+        if !root
+            .try_exists()
+            .with_context(|| format!("could not check scan root '{}'", root.display()))?
+        {
             bail!("scan root does not exist: {}", root.display());
         }
     }
@@ -338,6 +341,21 @@ mod tests {
         assert_eq!(
             error.to_string(),
             format!("scan root does not exist: {}", missing.display())
+        );
+    }
+
+    #[test]
+    fn unreadable_scan_root_error_names_the_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("file");
+        std::fs::write(&file, b"not a directory").unwrap();
+        let invalid_root = file.join("child");
+
+        let error = validate_roots(std::slice::from_ref(&invalid_root)).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("could not check scan root '{}'", invalid_root.display())
         );
     }
 
