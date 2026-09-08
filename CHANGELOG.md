@@ -9,6 +9,7 @@ All notable changes to Diskern are documented here. The format follows
 ### Fixed
 
 - The system temp rule no longer reaches user and project `var/tmp` directories
+- Chrome caches under macOS `~/Library/Caches` now appear in scan reports
 - A relative scan root no longer hides every finding a root-anchored rule
   would have made. `diskern scan tmp` from `/var` reported nothing to
   clean; roots are resolved to absolute paths before the walk
