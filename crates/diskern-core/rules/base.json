@@ -24,7 +24,7 @@
     },
     {
       "id": "chrome-cache",
-      "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**"],
+      "patterns": ["**/google/chrome/user data/*/cache/**", "**/.cache/google-chrome/**", "**/library/caches/google/chrome/*/cache/**", "**/library/caches/google/chrome/*/code cache/**"],
       "category": "browser_cache",
       "verdict": "safe",
       "description": "Chrome browser cache. Fully regenerated on next use; no effect on installed applications or saved data."
@@ -87,7 +87,7 @@
     },
     {
       "id": "temp-dirs",
-      "patterns": ["/tmp/**", "**/var/tmp/**", "**/appdata/local/temp/**"],
+      "patterns": ["/tmp/**", "/var/tmp/**", "/private/var/tmp/**", "**/appdata/local/temp/**"],
       "category": "temp_file",
       "verdict": "review",
       "description": "Temporary files. Usually safe once no program is using them."

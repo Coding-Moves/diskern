@@ -334,8 +334,11 @@ mod tests {
     fn rules_do_not_reach_outside_the_paths_they_name() {
         let db = RulesDb::embedded();
         for path in [
-            "/home/user/tmp/tax-return.pdf",     // not /tmp
-            "/home/user/var/log/notes.txt",      // not /var/log
+            "/home/user/tmp/tax-return.pdf", // not /tmp
+            "/home/user/var/log/notes.txt",  // not /var/log
+            "/home/user/var/tmp/notes.txt",  // not /var/tmp
+            "/home/user/project/var/tmp/session.dat",
+            "/opt/homebrew/var/tmp/formula.lock",
             "/home/user/Downloads/holiday.dmgx", // not a .dmg
             "/home/user/mytmp/scratch.bin",
         ] {
@@ -351,6 +354,7 @@ mod tests {
         for (path, expected) in [
             ("/tmp/build-9a2f/out.o", Category::TempFile),
             ("/var/tmp/systemd-private/x", Category::TempFile),
+            ("/private/var/tmp/com.apple.launchd/x", Category::TempFile),
             (
                 "C:\\Users\\x\\AppData\\Local\\Temp\\a.tmp",
                 Category::TempFile,
@@ -368,6 +372,30 @@ mod tests {
             let (cat, _, _) = db.classify(std::path::Path::new(path));
             assert_eq!(cat, expected, "{path}");
         }
+    }
+
+    #[test]
+    fn chrome_cache_is_safe_to_remove_on_each_platform() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/home/u/.cache/google-chrome/Default/Cache/data_0",
+            "C:\\Users\\x\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache\\data_0",
+            "/Users/x/Library/Caches/Google/Chrome/Default/Cache/data_0",
+            "/Users/x/Library/Caches/Google/Chrome/Default/Code Cache/js/index",
+        ] {
+            let (cat, verdict, rule) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::BrowserCache, "{path} matched {rule:?}");
+            assert_eq!(verdict, Verdict::Safe, "{path} matched {rule:?}");
+        }
+    }
+
+    #[test]
+    fn chrome_profile_data_is_not_safe_to_remove() {
+        let db = RulesDb::embedded();
+        let path = "/Users/x/Library/Application Support/Google/Chrome/Default/History";
+        let (cat, verdict, rule) = db.classify(std::path::Path::new(path));
+        assert_eq!(cat, Category::Unknown, "{path} matched {rule:?}");
+        assert_ne!(verdict, Verdict::Safe, "{path} matched {rule:?}");
     }
 
     /// Issue #40. `/mozilla/firefox/profiles` covered the whole profile

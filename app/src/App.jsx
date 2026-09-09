@@ -467,6 +467,12 @@ export default function App() {
     }
     if (!folder) return;
 
+    // Starting a scan invalidates the previous backend report authority.
+    // Clear the view at the same time so no stale row remains actionable.
+    setReport(null);
+    setScannedFolder(null);
+    setQuarantinedPaths(new Set());
+    setReclaimed(0);
     setLiveProgress({ files_seen: 0, bytes_seen: 0 });
     setScanning(true);
     setCancelling(false);
@@ -480,16 +486,14 @@ export default function App() {
 
     try {
       const result = await invoke("start_scan", { roots: [folder] });
-      // null means the scan was cancelled. Keep whatever report was already
-      // on screen rather than blanking the view.
+      // null means the scan was cancelled. The backend has no completed
+      // report authority after a cancellation, and the view was cleared when
+      // this scan began.
       if (result === null) {
         setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
       } else {
         setReport(result);
         setScannedFolder(folder);
-        // Fresh scan — clear any prior session's quarantine bookkeeping.
-        setQuarantinedPaths(new Set());
-        setReclaimed(0);
       }
     } catch (e) {
       setError(String(e));
