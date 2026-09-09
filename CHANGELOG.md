@@ -14,6 +14,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The landing page now applies its theme to the document root, preventing
+  light scrollbars, white overscroll areas, and a white flash before React loads
 - The system temp rule no longer reaches user and project `var/tmp` directories
 - Chrome caches under macOS `~/Library/Caches` now appear in scan reports
 - A relative scan root no longer hides every finding a root-anchored rule
