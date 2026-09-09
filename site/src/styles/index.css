@@ -3,6 +3,7 @@
    variable. Components never hardcode colors — they reference
    var(--something), so flipping [data-theme] repaints the whole page. */
 
+/* Keep --bg in sync with the pre-React background in site/index.html. */
 [data-theme='dark'] {
   --bg: #0b0d10;
   --bg-elevated: #12161c;
