@@ -14,6 +14,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The landing-page Windows installer label now matches the selected MSI or
+  EXE release asset
 - `diskern scan` now rejects missing and nonexistent roots instead of
   reporting a successful empty scan
 - The landing page now applies its theme to the document root, preventing
