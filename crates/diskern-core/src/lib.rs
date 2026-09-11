@@ -83,6 +83,22 @@ pub enum Verdict {
     Protected,
 }
 
+impl Verdict {
+    /// Return the more restrictive of two safety decisions.
+    ///
+    /// Keep this explicit instead of coupling action safety to the declaration
+    /// order of the enum. A future insertion or reordering must not silently
+    /// make a fresh defense-in-depth rule less restrictive.
+    pub const fn strictest(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Protected, _) | (_, Self::Protected) => Self::Protected,
+            (Self::Risky, _) | (_, Self::Risky) => Self::Risky,
+            (Self::Review, _) | (_, Self::Review) => Self::Review,
+            (Self::Safe, Self::Safe) => Self::Safe,
+        }
+    }
+}
+
 /// One finding = one row the user sees.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
@@ -116,3 +132,40 @@ pub enum GenomeError {
 }
 
 pub type Result<T> = std::result::Result<T, GenomeError>;
+
+/// Format a byte count into a human-readable decimal string (e.g. "1.5 GB", "420.0 MB"),
+/// matching what disk vendors and the rest of the UI report.
+pub fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = n as f64;
+    let mut unit = 0;
+    // 999.95, not 1000.0: at one decimal place anything at or above that
+    // rounds to "1000.0", which belongs in the next unit up. Choosing the
+    // unit before rounding printed 999_999 as "1000.0 KB".
+    while value >= 999.95 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{n} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_bytes_formatting() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(500), "500 B");
+        assert_eq!(human_bytes(999), "999 B");
+        assert_eq!(human_bytes(1_000), "1.0 KB");
+        assert_eq!(human_bytes(999_950), "1.0 MB");
+        assert_eq!(human_bytes(10_000_000), "10.0 MB");
+        assert_eq!(human_bytes(1_500_000_000), "1.5 GB");
+        assert_eq!(human_bytes(2_000_000_000_000), "2.0 TB");
+    }
+}

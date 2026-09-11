@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use diskern_core::{report, rules::RulesDb, scanner, Category, Finding, Verdict};
+use diskern_core::{human_bytes, report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -54,26 +54,6 @@ impl From<VerdictFilter> for Verdict {
             VerdictFilter::Risky => Verdict::Risky,
             VerdictFilter::Protected => Verdict::Protected,
         }
-    }
-}
-
-/// Bytes at the largest unit that keeps the number short. Decimal units,
-/// matching what disk vendors and the rest of the UI report.
-fn human_bytes(n: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = n as f64;
-    let mut unit = 0;
-    // 999.95, not 1000.0: at one decimal place anything at or above that
-    // rounds to "1000.0", which belongs in the next unit up. Choosing the
-    // unit before rounding printed 999_999 as "1000.0 KB".
-    while value >= 999.95 && unit < UNITS.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{n} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
     }
 }
 

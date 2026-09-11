@@ -6,10 +6,20 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Desktop quarantine now uses the exact finding from the completed backend
+  report, with graph-aware verdicts, generation-scoped report authority and
+  fail-closed stale-finding checks; frontend verdict values are never trusted
+
 ### Fixed
 
 - `diskern scan` now rejects missing and nonexistent roots instead of
   reporting a successful empty scan
+- The landing page now applies its theme to the document root, preventing
+  light scrollbars, white overscroll areas, and a white flash before React loads
+- The system temp rule no longer reaches user and project `var/tmp` directories
+- Chrome caches under macOS `~/Library/Caches` now appear in scan reports
 - A relative scan root no longer hides every finding a root-anchored rule
   would have made. `diskern scan tmp` from `/var` reported nothing to
   clean; roots are resolved to absolute paths before the walk

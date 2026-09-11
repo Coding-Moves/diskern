@@ -5,7 +5,7 @@ mod commands;
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(commands::ActiveScan::default())
+        .manage(std::sync::Arc::new(commands::ScanAuthority::default()))
         .setup(|app| {
             // Updater: desktop only, checked from the frontend after launch.
             #[cfg(desktop)]

@@ -135,7 +135,7 @@ Every pull request gets:
 | `lint` | `cargo fmt --check` and clippy with `--all-targets` (tests included) |
 | `test (ubuntu / windows / macos)` | The engine and CLI suite on all three platforms |
 | `app-tauri (ubuntu / windows / macos)` | Compiles the Tauri shell; only on changes under `crates/`, `app/` or the workflow |
-| `app-frontend`, `site` | Vite builds, plus oxlint for the site |
+| `app-frontend`, `site` | Vite builds, plus oxlint and theme regression tests for the site |
 | `typos` | Spell-checks code and docs — config in [`_typos.toml`](../_typos.toml) |
 | `doc-links` | Relative links between markdown files resolve |
 

@@ -51,7 +51,7 @@ jobs:
       # code but applies no lints to it, so without this the suite — by now
       # a good half of the crate — drifts unlinted while CI stays green.
       - run: cargo fmt --check
-      - run: cargo clippy -p diskern-core -p diskern-cli --all-targets -- -D warnings
+      - run: cargo clippy -p diskern-core -p diskern-cli --all-targets --all-features -- -D warnings
 
   # The engine's behaviour is platform-specific in ways a run on one OS
   # cannot reach, and it ships on more than one: `default_excludes` has a
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
-      - run: cargo test -p diskern-core -p diskern-cli
+      - run: cargo test -p diskern-core -p diskern-cli --all-features
 
   # Type-checks app/src-tauri against the current diskern-core. Until this
   # existed nothing compiled the Tauri crate between releases: a breaking
@@ -171,6 +171,7 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   # Desktop app frontend: Vite build only — no Tauri/webkitgtk needed,
