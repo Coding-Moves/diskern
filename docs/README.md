@@ -9,6 +9,10 @@
 | [RELEASING.md](RELEASING.md)     | Cutting a release; updater signing setup        |
 | [DEPENDENCY-AUTOMATION.md](DEPENDENCY-AUTOMATION.md) | Audit, auto-fix and Dependabot workflows |
 
+Release reviews:
+[2026-09-12 readiness review](audits/2026-09-12.md) — checks and follow-up
+issues recorded after v0.2.0.
+
 Contributor docs live at the repo root:
 [CONTRIBUTING.md](../CONTRIBUTING.md) ·
 [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) ·
