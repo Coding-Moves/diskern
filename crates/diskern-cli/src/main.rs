@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_scan_root_error_names_the_root() {
+    fn invalid_child_scan_root_error_names_the_root() {
         let temp = tempfile::tempdir().unwrap();
         let file = temp.path().join("file");
         std::fs::write(&file, b"not a directory").unwrap();
@@ -333,9 +333,12 @@ mod tests {
 
         let error = validate_roots(std::slice::from_ref(&invalid_root)).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            format!("could not check scan root '{}'", invalid_root.display())
+        // Operating systems report a child of a regular file differently.
+        // Both error branches must reject the root and preserve its path.
+        let root_display = invalid_root.display().to_string();
+        assert!(
+            error.to_string().contains(&root_display),
+            "expected the error to name {root_display}, got: {error:#}"
         );
     }
 
