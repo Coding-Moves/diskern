@@ -14,6 +14,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- `diskern scan` now rejects missing and nonexistent roots instead of
+  reporting a successful empty scan
 - The landing page now applies its theme to the document root, preventing
   light scrollbars, white overscroll areas, and a white flash before React loads
 - The system temp rule no longer reaches user and project `var/tmp` directories
