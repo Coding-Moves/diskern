@@ -545,11 +545,17 @@ export default function App() {
           });
           previewUnlistenRef.current = await listen("scan-preview", (event) => {
             const payload = event.payload;
-            setPreviewReport({
-              findings: payload.findings,
-              duplicate_sets: [],
-              total_reclaimable: payload.total_reclaimable,
-              files_scanned: payload.files_scanned,
+            setPreviewReport((prev) => {
+              const byPath = new Map((prev?.findings ?? []).map((f) => [f.entry.path, f]));
+              for (const finding of payload.findings) {
+                byPath.set(finding.entry.path, finding);
+              }
+              return {
+                findings: [...byPath.values()],
+                duplicate_sets: [],
+                total_reclaimable: payload.total_reclaimable,
+                files_scanned: payload.files_scanned,
+              };
             });
           });
 

@@ -68,7 +68,8 @@ test("cancel still works the same way", () => {
 
 test("the app subscribes to provisional scan preview events", () => {
   assert.match(jsx, /listen\("scan-preview"/);
-  assert.match(jsx, /setPreviewReport\(\{/);
+  assert.match(jsx, /setPreviewReport\(\(prev\) =>/);
+  assert.match(jsx, /byPath\.set\(finding\.entry\.path, finding\)/);
   assert.match(jsx, /duplicate_sets:\s*\[\]/);
 });
 

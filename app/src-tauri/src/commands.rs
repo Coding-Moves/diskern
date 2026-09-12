@@ -325,29 +325,30 @@ pub async fn start_scan(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let mut counted_identities: HashSet<FileIdentity> = HashSet::new();
-        let mut preview_findings = Vec::new();
+        let mut preview_batch = Vec::new();
         let mut preview_total_reclaimable = 0;
-        let mut next_preview_emit = 25;
+        let mut preview_files_scanned = 0;
         match scanner::scan_with(&opts, progress_for_scan.clone(), |entry| {
             if let Some(finding) =
                 report::provisional_finding(entry, &rules, &mut counted_identities, now)
             {
                 preview_total_reclaimable += finding.reclaimable;
-                preview_findings.push(finding);
+                preview_batch.push(finding);
 
-                // A scan can find many files per second. Emit in modest
-                // batches so the frontend gets early rows without making
-                // every single filesystem entry a cross-thread UI event.
-                if preview_findings.len() == next_preview_emit {
+                // A scan can find many files per second. Emit only the new
+                // rows in modest batches so preview events do not repeatedly
+                // clone and resend the whole scan-so-far.
+                if preview_batch.len() == 25 {
+                    preview_files_scanned = progress_for_scan.files_seen.load(Ordering::Relaxed);
+                    let findings = std::mem::take(&mut preview_batch);
                     let _ = window_for_preview.emit(
                         "scan-preview",
                         ScanPreviewPayload {
-                            findings: preview_findings.clone(),
-                            files_scanned: progress_for_scan.files_seen.load(Ordering::Relaxed),
+                            findings,
+                            files_scanned: preview_files_scanned,
                             total_reclaimable: preview_total_reclaimable,
                         },
                     );
-                    next_preview_emit += 25;
                 }
             }
         }) {
@@ -358,8 +359,9 @@ pub async fn start_scan(
                 let _ = window_for_preview.emit(
                     "scan-preview",
                     ScanPreviewPayload {
-                        findings: preview_findings,
-                        files_scanned: progress_for_scan.files_seen.load(Ordering::Relaxed),
+                        findings: preview_batch,
+                        files_scanned: preview_files_scanned
+                            .max(progress_for_scan.files_seen.load(Ordering::Relaxed)),
                         total_reclaimable: preview_total_reclaimable,
                     },
                 );
