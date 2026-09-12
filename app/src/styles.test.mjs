@@ -105,3 +105,12 @@ test("the chevron rotates instead of swapping glyphs", () => {
   assert.match(css, /\.chevron\s*\{[^}]*transition\s*:[^}]*transform\b/s);
   assert.match(css, /\.chevron\.open\s*\{[^}]*transform\s*:\s*rotate\s*\(/s);
 });
+
+test("scan progress exposes a readable phase label", () => {
+  assert.match(css, /\.progress-phase\s*\{/);
+  assert.match(
+    css,
+    /\.progress-phase\s*\{[^}]*font-weight\s*:\s*600\b/s,
+    "the phase should read as the main scan status, above the numeric counter"
+  );
+});
