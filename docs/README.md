@@ -13,6 +13,10 @@ Release reviews:
 [2026-09-12 readiness review](audits/2026-09-12.md) — checks and follow-up
 issues recorded after v0.2.0.
 
+Release notes:
+[v0.3.0](releases/v0.3.0.md) — download links, highlights, fixes and
+contributor credits for the third release.
+
 Contributor docs live at the repo root:
 [CONTRIBUTING.md](../CONTRIBUTING.md) ·
 [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) ·

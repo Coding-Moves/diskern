@@ -32,6 +32,8 @@ Choose the next version and update all of these together:
 | `app/package.json` | `version` |
 | `app/package-lock.json` | Top-level and root package versions |
 | `CHANGELOG.md` | Move completed changes from `Unreleased` into a dated release entry |
+| `README.md` | Public download links for the versioned release artifacts |
+| `docs/releases/vX.Y.Z.md` | Draft release notes, download links and contributor credits |
 
 After editing the version fields, let Cargo and npm refresh their lockfiles:
 
@@ -39,7 +41,7 @@ After editing the version fields, let Cargo and npm refresh their lockfiles:
 cargo check -p diskern-core -p diskern-cli
 (cd app && npm install --package-lock-only --ignore-scripts)
 git diff -- Cargo.toml Cargo.lock app/package.json app/package-lock.json \
-  app/src-tauri/tauri.conf.json CHANGELOG.md
+  app/src-tauri/tauri.conf.json CHANGELOG.md README.md docs/releases/
 ```
 
 Check that the diff contains the intended version updates. Keep unrelated

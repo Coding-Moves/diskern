@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "diskern-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "diskern-core",
  "serde",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "diskern-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "diskern-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "dashmap",

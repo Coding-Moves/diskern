@@ -9,6 +9,22 @@ Diskern scans your computer, understands what every file is *for*, and
 safely frees up space — explaining exactly what's safe to remove and what
 would break if you did.
 
+## Download
+
+Get Diskern from the [download page](https://coding-moves.github.io/diskern/)
+or the [latest GitHub release](https://github.com/Coding-Moves/diskern/releases/latest).
+
+For this release:
+
+- [Windows `.msi`](https://github.com/Coding-Moves/diskern/releases/download/v0.3.0/Diskern_0.3.0_x64_en-US.msi)
+- [Windows `.exe`](https://github.com/Coding-Moves/diskern/releases/download/v0.3.0/Diskern_0.3.0_x64-setup.exe)
+- [Debian/Ubuntu `.deb`](https://github.com/Coding-Moves/diskern/releases/download/v0.3.0/Diskern_0.3.0_amd64.deb)
+- [Fedora/RHEL `.rpm`](https://github.com/Coding-Moves/diskern/releases/download/v0.3.0/Diskern-0.3.0-1.x86_64.rpm)
+- [Linux AppImage](https://github.com/Coding-Moves/diskern/releases/download/v0.3.0/Diskern_0.3.0_amd64.AppImage)
+
+Existing desktop installs check the signed updater manifest at
+[`latest.json`](https://github.com/Coding-Moves/diskern/releases/latest/download/latest.json).
+
 ![diskern scan grouping findings by verdict, each with the rule that matched and the evidence behind it](docs/images/cli-scan.png)
 
 Findings are grouped by verdict, and every row carries the rule that
@@ -83,5 +99,4 @@ Diskern about a cache on your platform is a
 [MIT](LICENSE). Unless you explicitly state otherwise, any contribution
 you intentionally submit for inclusion in this work shall be licensed as
 MIT, without any additional terms or conditions. 
-
 

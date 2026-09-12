@@ -6,24 +6,32 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-12
+
 ### Changed
 
 - Desktop quarantine now uses the exact finding from the completed backend
   report, with graph-aware verdicts, generation-scoped report authority and
   fail-closed stale-finding checks; frontend verdict values are never trusted
+- CI now runs the desktop backend tests in the Tauri app job, making release
+  checks catch shared engine/app regressions on every supported platform
 
 ### Fixed
 
 - The landing-page Windows installer label now matches the selected MSI or
   EXE release asset
-- `diskern scan` now rejects missing and nonexistent roots instead of
-  reporting a successful empty scan
 - Scans now report missing or unreadable roots from the shared engine, so the
   desktop app and CLI both fail clearly instead of returning an empty report
 - Repeated and nested scan roots are only counted once, so selecting a parent
   directory and one of its children no longer doubles file counts or bytes
+- The CLI preserves scan-root context in OS-specific invalid-root errors,
+  including Windows cases where a child path sits under a regular file
+- The CLI scan summary now uses singular wording for one finding or one
+  duplicate set
 - The landing page now applies its theme to the document root, preventing
   light scrollbars, white overscroll areas, and a white flash before React loads
+- The landing page package lockfile name now matches `package.json`, keeping
+  npm install and Pages builds aligned
 - The system temp rule no longer reaches user and project `var/tmp` directories
 - Chrome caches under macOS `~/Library/Caches` now appear in scan reports
 - A relative scan root no longer hides every finding a root-anchored rule
@@ -31,6 +39,24 @@ All notable changes to Diskern are documented here. The format follows
   clean; roots are resolved to absolute paths before the walk
 - Scanning a root inside an excluded directory says so, instead of walking
   it to an empty report that reads like a clean disk
+
+### Contributors
+
+- [@Muawiya-contact](https://github.com/Muawiya-contact) — release readiness,
+  scan-root accounting, shared root-error handling, absolute-root fixes,
+  docs, CI cleanup, and site/package maintenance
+- [@Akimbo92i](https://github.com/Akimbo92i) — Windows installer download
+  label fix and regression tests
+- [@alexsmolya](https://github.com/alexsmolya) — report-backed quarantine
+  authority and stale-finding safety
+- [@be-student](https://github.com/be-student) — invalid scan-root handling,
+  macOS Chrome cache coverage, and safer system temp matching
+- [@uchiha-suraj](https://github.com/uchiha-suraj) — landing-page theme
+  root fix
+- [@vhmns14](https://github.com/vhmns14) — singular CLI summary wording,
+  AI-feature CI coverage, and desktop backend test coverage
+- [@github-actions](https://github.com/apps/github-actions) — automated Rust
+  dependency refresh
 
 ## [0.2.0] — 2026-09-07
 
