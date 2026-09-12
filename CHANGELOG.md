@@ -6,6 +6,10 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- npm download caches are now classified as safe package-manager cache files
+
 ### Fixed
 
 - The CLI scan summary now says "1 file" instead of "1 files" when a
