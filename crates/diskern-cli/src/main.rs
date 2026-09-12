@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use diskern_core::{human_bytes, report, rules::RulesDb, scanner, Category, Finding, Verdict};
+use diskern_core::{
+    ai::{AiProvider, TemplateNarrator},
+    human_bytes, report,
+    rules::RulesDb,
+    scanner, Category, Finding, Verdict,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,6 +32,9 @@ enum Command {
         /// Emit full JSON report instead of a summary
         #[arg(long)]
         json: bool,
+        /// Print a deterministic plain-language explanation of the report
+        #[arg(long)]
+        explain: bool,
         /// Show at most N findings per category; 0 shows every one
         #[arg(long, value_name = "N", default_value_t = 5)]
         top: usize,
@@ -235,6 +243,7 @@ fn main() -> Result<()> {
             roots,
             exclude,
             json,
+            explain,
             top,
             verdict,
             rules,
@@ -276,6 +285,11 @@ fn main() -> Result<()> {
                     .iter()
                     .filter(|f| wanted.is_none_or(|v| f.verdict == v))
                     .collect();
+                if explain {
+                    println!();
+                    println!("Explanation:");
+                    println!("{}", TemplateNarrator.narrate(&report.findings)?);
+                }
                 print_findings(&findings, top);
 
                 // Duplicates have no verdict of their own, so a --verdict

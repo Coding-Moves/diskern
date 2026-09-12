@@ -19,6 +19,9 @@ diskern scan ~ --exclude ~/Videos --exclude ~/VMs
 
 # Full JSON report (for scripting / piping into jq)
 diskern scan ~/Downloads --json
+
+# Add deterministic narration over the finished report
+diskern scan ~/Downloads --explain
 ```
 
 ### Output
@@ -56,6 +59,7 @@ nothing will offer to move it.
 | `--top N`   | `5`     | Findings shown per category; `0` shows every one.       |
 | `--exclude <dir>` | platform defaults | Skip a directory while scanning; repeat the flag to skip more. User excludes are added to the built-in protected excludes. |
 | `--verdict` | all     | `safe`, `review`, `risky` or `protected`. Duplicate sets have no verdict, so they are omitted when this is set. |
+| `--explain` | off | Print deterministic narration over the finished report. |
 | `--json`    | off     | Full report as JSON; the flags above don't apply.        |
 | `--rules <file>` | embedded | Load and validate an external rules database; embedded protected rules remain authoritative. |
 

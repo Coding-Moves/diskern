@@ -202,6 +202,34 @@ fn risky_rows_show_file_size_while_totals_report_reclaimable() {
 }
 
 #[test]
+fn scan_explain_prints_template_narration() {
+    let root = tempdir().unwrap();
+    write_verdict_fixture(root.path());
+
+    let output = scan(root.path(), &["--explain", "--top", "0"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Explanation:\nFound"),
+        "explanation heading missing:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("reclaimable. Top reasons:"),
+        "template narration missing reclaimable summary:\n{stdout}"
+    );
+    assert!(
+        at(&stdout, "Explanation:") < at(&stdout, "Safe to remove"),
+        "explanation should introduce the detailed findings:\n{stdout}"
+    );
+}
+
+#[test]
 fn scan_json_emits_a_parseable_report_with_the_promised_fields() {
     let root = tempdir().unwrap();
     write_verdict_fixture(root.path());
