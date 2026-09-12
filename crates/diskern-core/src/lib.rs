@@ -76,8 +76,6 @@ pub enum Category {
     TempFile,
     Log,
     Installer,
-    DuplicateFile,
-    EmptyDirectory,
     SystemCritical, // driver stores, OS components — never touch
     Unknown,
 }
