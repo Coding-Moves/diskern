@@ -24,9 +24,11 @@ export function createAppState() {
     },
 
     beginUpdateInstall() {
-      if (installingUpdate || activeOperations > 0) return false;
+      if (installingUpdate || activeOperations > 0) return null;
       installingUpdate = true;
-      return true;
+      return () => {
+        installingUpdate = false;
+      };
     },
 
     resetForTests() {
@@ -71,10 +73,16 @@ export function createUpdateChecker({
         `Diskern ${update.version} is available.\n\n${update.body ?? ""}\n\nRestart to update?`
       );
       if (!ok) return "declined";
-      if (!state.beginUpdateInstall()) return "deferred";
+      const releaseInstall = state.beginUpdateInstall();
+      if (!releaseInstall) return "deferred";
 
-      await update.install();
-      await relaunch();
+      try {
+        await update.install();
+        await relaunch();
+      } catch (e) {
+        releaseInstall();
+        throw e;
+      }
       return "installed";
     } catch (e) {
       // Updates are best-effort; never surface errors to the user on startup.

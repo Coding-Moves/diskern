@@ -104,3 +104,29 @@ test("starting update installation prevents new operations", async () => {
     /update is installing/i
   );
 });
+
+test("failed update installation allows operations again", async () => {
+  const state = createAppState();
+  const warnings = [];
+
+  const checkForUpdates = createUpdateChecker({
+    state,
+    confirm: () => true,
+    warn: (...args) => warnings.push(args),
+    relaunch: async () => {
+      throw new Error("relaunch failed");
+    },
+    check: async () => ({
+      version: "0.4.0",
+      download: async () => {},
+      install: async () => {},
+    }),
+  });
+
+  assert.equal(await checkForUpdates(), "error");
+  assert.equal(state.installingUpdate, false);
+  assert.equal(warnings.length, 1);
+
+  await runAppOperation(async () => "ok", { state });
+  assert.equal(state.busy, false);
+});
