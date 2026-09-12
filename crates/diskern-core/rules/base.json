@@ -58,6 +58,13 @@
       "description": "pip download cache. Packages are re-downloaded on demand."
     },
     {
+      "id": "npm-cache",
+      "patterns": ["**/.npm/_cacache/**", "**/appdata/local/npm-cache/**"],
+      "category": "package_manager_cache",
+      "verdict": "safe",
+      "description": "npm's download cache. Re-fetched on demand; removing it only makes the next install download packages again."
+    },
+    {
       "id": "unix-system-logs",
       "patterns": ["/var/log/**", "/private/var/log/**"],
       "category": "log",
