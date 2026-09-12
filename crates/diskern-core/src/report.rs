@@ -1,7 +1,9 @@
 //! Assembles scanner + dedup + rules + risk into Findings — the single
 //! structure both the CLI and the Tauri UI render.
 
-use crate::{dedup, graph, risk, rules::RulesDb, Category, FileEntry, Finding, Verdict};
+use crate::{
+    dedup, graph, risk, rules::RulesDb, Category, FileEntry, FileIdentity, Finding, Verdict,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -101,6 +103,7 @@ pub fn build_with(
     let files_scanned = entries.len() as u64;
 
     let mut findings = Vec::new();
+    let mut counted_identities = HashSet::new();
     for (entry, class) in entries.into_iter().zip(verdicts) {
         if cancelled.load(Ordering::Relaxed) {
             return None;
@@ -125,13 +128,10 @@ pub fn build_with(
         }
         reasons.extend(assessment.reasons);
 
+        let reclaimable = finding_reclaimable(&entry, class.verdict, &mut counted_identities);
+
         findings.push(Finding {
-            // Bytes nothing will ever offer to move are not reclaimable.
-            reclaimable: if is_actionable(class.verdict) {
-                entry.size
-            } else {
-                0
-            },
+            reclaimable,
             entry,
             category: class.category,
             verdict: class.verdict,
@@ -164,6 +164,28 @@ fn is_actionable(verdict: Verdict) -> bool {
         Verdict::Safe | Verdict::Review => true,
         Verdict::Risky | Verdict::Protected => false,
     }
+}
+
+fn finding_reclaimable(
+    entry: &FileEntry,
+    verdict: Verdict,
+    counted_identities: &mut HashSet<FileIdentity>,
+) -> u64 {
+    // Bytes nothing will ever offer to move are not reclaimable.
+    if !is_actionable(verdict) {
+        return 0;
+    }
+
+    // Moving one hard-link name does not free the file's blocks. Count the
+    // shared bytes once across all findings that point at the same file.
+    if entry
+        .identity
+        .is_some_and(|identity| !counted_identities.insert(identity))
+    {
+        return 0;
+    }
+
+    entry.size
 }
 
 /// What the pipeline worked out about one entry before findings are built.
@@ -304,6 +326,62 @@ mod tests {
         assert_eq!(report.duplicate_sets[0].wasted, 4);
         // Both copies are already offered as findings, so the duplicate
         // set adds nothing on top of them.
+        assert_eq!(report.total_reclaimable, 8);
+    }
+
+    /// Issue #66. Two hard-linked names point at the same file blocks, so
+    /// moving one name does not free another copy's worth of space.
+    #[test]
+    fn hard_linked_findings_count_their_bytes_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("dk-scratch");
+        std::fs::create_dir(&tmp).unwrap();
+        let a = tmp.join("a.iso");
+        let b = tmp.join("b.iso");
+        std::fs::write(&a, b"same").unwrap();
+        std::fs::hard_link(&a, &b).unwrap();
+
+        let never = AtomicBool::new(false);
+        let report = build_with(
+            scan_dir(dir.path()),
+            &temp_rules(),
+            &ReportOptions::default(),
+            &never,
+        )
+        .unwrap();
+
+        assert_eq!(report.findings.len(), 2);
+        assert!(report.duplicate_sets.is_empty());
+        assert_eq!(report.total_reclaimable, 4);
+    }
+
+    /// A hard-linked pair plus a separate copy has two real copies on disk,
+    /// not three. Count the shared finding bytes once and let dedup account
+    /// for the separate copy without adding the same bytes again.
+    #[test]
+    fn hard_linked_findings_shared_with_a_real_copy_count_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("dk-scratch");
+        std::fs::create_dir(&tmp).unwrap();
+        let a = tmp.join("a.iso");
+        let b = tmp.join("b.iso");
+        let c = tmp.join("c.iso");
+        std::fs::write(&a, b"same").unwrap();
+        std::fs::hard_link(&a, &b).unwrap();
+        std::fs::write(&c, b"same").unwrap();
+
+        let never = AtomicBool::new(false);
+        let report = build_with(
+            scan_dir(dir.path()),
+            &temp_rules(),
+            &ReportOptions::default(),
+            &never,
+        )
+        .unwrap();
+
+        assert_eq!(report.findings.len(), 3);
+        assert_eq!(report.duplicate_sets.len(), 1);
+        assert_eq!(report.duplicate_sets[0].wasted, 4);
         assert_eq!(report.total_reclaimable, 8);
     }
 
