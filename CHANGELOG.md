@@ -8,6 +8,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Added
 
+- The CLI now exposes the deterministic AI narration seam with `diskern scan
+  --explain`, summarising the finished report without changing verdicts or actions
 - npm download caches are now classified as safe package-manager cache files
 - The desktop app now honours the `prefers-reduced-motion` OS/browser
   setting, so the scan progress bar and any future animations or
