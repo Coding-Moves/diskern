@@ -6,6 +6,7 @@ import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { visibleDuplicateSets } from "./duplicates.js";
 import { runAppOperation } from "./updateCoordinator.js";
 import { humanBytes } from "./format.js";
+import BrandMark from "./BrandMark.jsx";
 
 const CATEGORY_LABEL = {
   browser_cache: "Browser cache",
@@ -366,19 +367,7 @@ function ScanningIndicator({ filesSeen, bytesSeen, phase, onCancel, cancelling }
     <div className={`scan-progress${cancelling ? " cancelling" : ""}`}>
       <div className="scan-head">
         {/* Decorative — the status text already says the scan is safe. */}
-        <svg
-          className="scan-mark"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 3l7 2.6V11c0 4.6-3 7.9-7 9-4-1.1-7-4.4-7-9V5.6L12 3z" />
-          <path d="M8.8 12.2l2.2 2.2 4.4-4.8" />
-        </svg>
+        <BrandMark className="scan-mark" />
         <div className="scan-copy">
           <p className="scan-status">
             {cancelling
@@ -559,7 +548,10 @@ export default function App() {
   return (
     <main className="shell">
       <header>
-        <h1>Diskern</h1>
+        <div className="brand">
+          <BrandMark className="header-mark" />
+          <h1>Diskern</h1>
+        </div>
         <p className="tagline">Understand your disk before you clean it.</p>
       </header>
 

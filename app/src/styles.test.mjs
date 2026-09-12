@@ -136,6 +136,25 @@ test("scan progress exposes a readable phase label", () => {
   );
 });
 
+test("the shared mark has a sane default size", () => {
+  // BrandMark renders no width/height attributes, so bare usage would
+  // fall back to the replaced-element default (300×150) without this.
+  assert.match(css, /\.brand-mark\s*\{[^}]*width\s*:/s);
+});
+
+test("the header pairs the brand mark with the wordmark", () => {
+  assert.match(
+    css,
+    /\.brand\s*\{[^}]*display\s*:\s*flex\b/s,
+    "the brand row lays mark and wordmark side by side"
+  );
+  assert.match(
+    css,
+    /\.header-mark\s*\{[^}]*width\s*:/s,
+    "the header variant sizes the shared mark"
+  );
+});
+
 test("the scanning state is a branded panel, not a bare bar", () => {
   assert.match(
     css,

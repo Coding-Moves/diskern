@@ -28,6 +28,10 @@ All notable changes to Diskern are documented here. The format follows
   sweep animates on transforms so it cannot shift layout, and cancelling
   settles into a dimmed, motionless state — all covered by the same
   reduced-motion setting
+- The desktop app has one reusable brand mark: the shield-check SVG now
+  lives in a `BrandMark` component (stroke-only, `currentColor`, always
+  decorative) shared by the header and the scanning panel, so future
+  empty or update states reuse the same asset instead of copying markup
 
 ### Fixed
 
