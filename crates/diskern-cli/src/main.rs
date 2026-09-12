@@ -89,8 +89,6 @@ fn category_label(c: Category) -> &'static str {
         Category::TempFile => "Temporary files",
         Category::Log => "Logs",
         Category::Installer => "Installers",
-        Category::DuplicateFile => "Duplicate file",
-        Category::EmptyDirectory => "Empty folders",
         Category::SystemCritical => "System critical",
         Category::Unknown => "Unrecognized",
     }

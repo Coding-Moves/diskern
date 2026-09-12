@@ -12,8 +12,6 @@ const CATEGORY_LABEL = {
   temp_file: "Temporary files",
   log: "Logs",
   installer: "Old installers",
-  duplicate_file: "Duplicate file",
-  empty_directory: "Empty folders",
   system_critical: "System critical",
   unknown: "Unrecognized",
 };
