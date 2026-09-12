@@ -59,6 +59,7 @@ mod tests {
                 modified: None,
                 accessed: None,
                 is_symlink: false,
+                identity: None,
                 hash: None,
             },
             category: Category::BrowserCache,

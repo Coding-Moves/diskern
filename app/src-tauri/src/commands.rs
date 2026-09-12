@@ -434,6 +434,7 @@ mod tests {
                     modified: metadata.modified().ok().map(epoch),
                     accessed: metadata.accessed().ok().map(epoch),
                     is_symlink: metadata.file_type().is_symlink(),
+                    identity: None,
                     hash: None,
                 },
                 category: Category::TempFile,

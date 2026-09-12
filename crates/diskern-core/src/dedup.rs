@@ -7,7 +7,7 @@
 use crate::FileEntry;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,20 +113,35 @@ where
 
     let mut sets: Vec<DuplicateSet> = by_hash
         .into_iter()
-        .filter(|(_, v)| v.len() > 1)
-        .map(|(hash, group)| {
+        .filter_map(|(hash, group)| {
+            let group = one_entry_per_file_identity(group);
+            if group.len() <= 1 {
+                return None;
+            }
+
             let size = group[0].size;
-            DuplicateSet {
+            Some(DuplicateSet {
                 hash: hash.to_string(),
                 size,
                 wasted: size * (group.len() as u64 - 1),
                 paths: group.iter().map(|e| e.path.clone()).collect(),
-            }
+            })
         })
         .collect();
 
     sets.sort_by_key(|s| std::cmp::Reverse(s.wasted)); // biggest wins first
     Some(sets)
+}
+
+fn one_entry_per_file_identity(group: Vec<&FileEntry>) -> Vec<&FileEntry> {
+    let mut seen = HashSet::new();
+    group
+        .into_iter()
+        .filter(|entry| match entry.identity {
+            Some(identity) => seen.insert(identity),
+            None => true,
+        })
+        .collect()
 }
 
 fn hash_file(path: &std::path::Path) -> Option<String> {
@@ -148,6 +163,46 @@ mod tests {
         std::fs::write(dir.path().join("a"), b"same-bytes").unwrap();
         std::fs::write(dir.path().join("b"), b"same-bytes").unwrap();
         std::fs::write(dir.path().join("c"), b"different!").unwrap();
+
+        let opts = ScanOptions {
+            roots: vec![dir.path().to_path_buf()],
+            ..Default::default()
+        };
+        let mut entries = scan(&opts, Arc::new(ScanProgress::default())).unwrap();
+        let sets = find_duplicates(&mut entries);
+
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].paths.len(), 2);
+        assert_eq!(sets[0].wasted, 10);
+    }
+
+    #[test]
+    fn hard_links_do_not_count_as_duplicate_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::write(&a, b"same-bytes").unwrap();
+        std::fs::hard_link(&a, &b).unwrap();
+
+        let opts = ScanOptions {
+            roots: vec![dir.path().to_path_buf()],
+            ..Default::default()
+        };
+        let mut entries = scan(&opts, Arc::new(ScanProgress::default())).unwrap();
+        let sets = find_duplicates(&mut entries);
+
+        assert!(sets.is_empty());
+    }
+
+    #[test]
+    fn hard_links_shared_with_a_real_copy_count_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        let c = dir.path().join("c");
+        std::fs::write(&a, b"same-bytes").unwrap();
+        std::fs::hard_link(&a, &b).unwrap();
+        std::fs::write(&c, b"same-bytes").unwrap();
 
         let opts = ScanOptions {
             roots: vec![dir.path().to_path_buf()],

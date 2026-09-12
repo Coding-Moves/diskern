@@ -40,6 +40,16 @@ pub mod ai;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Stable identity for a filesystem file.
+///
+/// Two paths with the same identity are hard links to the same bytes on disk.
+/// Dedup uses this to avoid counting those extra names as reclaimable copies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileIdentity {
+    pub device: u64,
+    pub file: u64,
+}
+
 /// A single filesystem entry discovered by the scanner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -49,6 +59,9 @@ pub struct FileEntry {
     pub modified: Option<i64>,
     pub accessed: Option<i64>,
     pub is_symlink: bool,
+    /// Filesystem identity, when the platform reports one.
+    #[serde(default)]
+    pub identity: Option<FileIdentity>,
     /// BLAKE3 hash — only computed for size-collision candidates.
     pub hash: Option<String>,
 }
