@@ -8,6 +8,11 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Added
 
+- Long result lists in the desktop app now mount a first page instead of
+  every row: each findings category shows 100 rows, the duplicates panel
+  100 sets, and each duplicate set 25 paths, with a Show more / Show less
+  toggle revealing or re-capping the rest — large scans no longer push
+  thousands of rows into the DOM, so scrolling and expanding stay smooth
 - Desktop scans now stream provisional finding rows while the walk is still
   running, then replace them with the final graph- and duplicate-checked report
   before any quarantine action is offered
