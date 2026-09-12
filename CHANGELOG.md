@@ -16,6 +16,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The impact graph now recognises Go, Maven, Gradle, Ruby, PHP, and Dart
+  project stores, so live build output is not treated like abandoned data
 - The desktop duplicate panel now hides quarantined paths and recalculates
   wasted bytes after quarantine or restore actions
 - Desktop updates now wait while scan, quarantine, restore, or purge operations
