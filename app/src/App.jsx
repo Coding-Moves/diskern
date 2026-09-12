@@ -548,7 +548,10 @@ export default function App() {
   return (
     <main className="shell">
       <header>
-        <h1>Diskern</h1>
+        <div className="brand">
+          <BrandMark className="header-mark" />
+          <h1>Diskern</h1>
+        </div>
         <p className="tagline">Understand your disk before you clean it.</p>
       </header>
 
