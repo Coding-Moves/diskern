@@ -55,11 +55,11 @@ function byCategory(items) {
  * never even passes risky/protected rows a usable quarantineDir path, but
  * the verdict gate here is the visible guarantee the task requires.
  */
-function FindingRow({ f, quarantineDir, onQuarantined }) {
+function FindingRow({ f, quarantineDir, onQuarantined, actionsDisabled = false }) {
   const [phase, setPhase] = useState("idle"); // idle | confirming | working
   const [rowError, setRowError] = useState(null);
 
-  const canQuarantine = ACTIONABLE_VERDICTS.has(f.verdict);
+  const canQuarantine = ACTIONABLE_VERDICTS.has(f.verdict) && !actionsDisabled;
 
   async function doQuarantine() {
     setRowError(null);
@@ -95,6 +95,10 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
           first one. */}
       <span className="why">{f.reasons.join(" · ")}</span>
 
+      {actionsDisabled && ACTIONABLE_VERDICTS.has(f.verdict) && (
+        <span className="row-action preview-only">Preview only</span>
+      )}
+
       {canQuarantine && (
         <span className="row-action">
           {phase === "idle" && (
@@ -128,7 +132,7 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
   );
 }
 
-function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantined }) {
+function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantined, actionsDisabled = false }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   if (items.length === 0) return null;
   const total = items.reduce((s, f) => s + f.reclaimable, 0);
@@ -156,6 +160,7 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
                     f={f}
                     quarantineDir={quarantineDir}
                     onQuarantined={onQuarantined}
+                    actionsDisabled={actionsDisabled}
                   />
                 ))}
               </ul>
@@ -406,6 +411,7 @@ function ScanningIndicator({ filesSeen, bytesSeen, phase, onCancel, cancelling }
 
 export default function App() {
   const [report, setReport] = useState(null);
+  const [previewReport, setPreviewReport] = useState(null);
   const [scannedFolder, setScannedFolder] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -427,7 +433,8 @@ export default function App() {
   // Bumped whenever this session moves a file in, so the quarantine list
   // re-reads the manifest rather than guessing at what changed.
   const [quarantineVersion, setQuarantineVersion] = useState(0);
-  const unlistenRef = useRef(null);
+  const progressUnlistenRef = useRef(null);
+  const previewUnlistenRef = useRef(null);
 
   // Resolve a sensible, always-writable quarantine location once on mount:
   // <app local data dir>/Quarantine (e.g. %LOCALAPPDATA%\com.diskern.app\
@@ -445,20 +452,26 @@ export default function App() {
     })();
   }, []);
 
+  const displayedReport = report ?? previewReport;
+  const showingPreview = Boolean(previewReport && !report);
+
   const visibleFindings = useMemo(() => {
-    if (!report) return [];
-    if (quarantinedPaths.size === 0) return report.findings;
-    return report.findings.filter((f) => !quarantinedPaths.has(f.entry.path));
-  }, [report, quarantinedPaths]);
+    if (!displayedReport) return [];
+    if (quarantinedPaths.size === 0) return displayedReport.findings;
+    return displayedReport.findings.filter((f) => !quarantinedPaths.has(f.entry.path));
+  }, [displayedReport, quarantinedPaths]);
 
   const groups = useMemo(
-    () => (report ? groupFindings(visibleFindings) : null),
-    [report, visibleFindings]
+    () => (displayedReport ? groupFindings(visibleFindings) : null),
+    [displayedReport, visibleFindings]
   );
 
   const duplicateSets = useMemo(
-    () => (report ? visibleDuplicateSets(report.duplicate_sets, quarantinedPaths) : []),
-    [report, quarantinedPaths]
+    () =>
+      displayedReport
+        ? visibleDuplicateSets(displayedReport.duplicate_sets, quarantinedPaths)
+        : [],
+    [displayedReport, quarantinedPaths]
   );
 
   function handleQuarantined(finding) {
@@ -516,6 +529,7 @@ export default function App() {
         // Starting a scan invalidates the previous backend report authority.
         // Clear the view at the same time so no stale row remains actionable.
         setReport(null);
+        setPreviewReport(null);
         setScannedFolder(null);
         setQuarantinedPaths(new Set());
         setReclaimed(0);
@@ -526,8 +540,23 @@ export default function App() {
         try {
           // Subscribe to live progress events emitted by the Rust command
           // roughly every 150ms while the scan runs.
-          unlistenRef.current = await listen("scan-progress", (event) => {
+          progressUnlistenRef.current = await listen("scan-progress", (event) => {
             setLiveProgress(event.payload);
+          });
+          previewUnlistenRef.current = await listen("scan-preview", (event) => {
+            const payload = event.payload;
+            setPreviewReport((prev) => {
+              const byPath = new Map((prev?.findings ?? []).map((f) => [f.entry.path, f]));
+              for (const finding of payload.findings) {
+                byPath.set(finding.entry.path, finding);
+              }
+              return {
+                findings: [...byPath.values()],
+                duplicate_sets: [],
+                total_reclaimable: payload.total_reclaimable,
+                files_scanned: payload.files_scanned,
+              };
+            });
           });
 
           const result = await invoke("start_scan", { roots: [folder] });
@@ -535,8 +564,10 @@ export default function App() {
           // report authority after a cancellation, and the view was cleared when
           // this scan began.
           if (result === null) {
+            setPreviewReport(null);
             setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
           } else {
+            setPreviewReport(null);
             setReport(result);
             setScannedFolder(folder);
           }
@@ -545,9 +576,13 @@ export default function App() {
         } finally {
           setScanning(false);
           setCancelling(false);
-          if (unlistenRef.current) {
-            unlistenRef.current();
-            unlistenRef.current = null;
+          if (progressUnlistenRef.current) {
+            progressUnlistenRef.current();
+            progressUnlistenRef.current = null;
+          }
+          if (previewUnlistenRef.current) {
+            previewUnlistenRef.current();
+            previewUnlistenRef.current = null;
           }
         }
       });
@@ -563,7 +598,7 @@ export default function App() {
         <p className="tagline">Understand your disk before you clean it.</p>
       </header>
 
-      {!report && (
+      {!displayedReport && (
         <section className="empty">
           <p>Run a read-only scan. Nothing is deleted — ever — without your review.</p>
           <button onClick={runScan} disabled={scanning}>
@@ -590,14 +625,24 @@ export default function App() {
         </section>
       )}
 
-      {report && (
+      {displayedReport && (
         <section>
           <p className="summary">
-            {scannedFolder && <span className="scanned-folder">{scannedFolder}</span>}
+            {showingPreview ? (
+              <span className="scanned-folder">Preview while scanning</span>
+            ) : (
+              scannedFolder && <span className="scanned-folder">{scannedFolder}</span>
+            )}
             <br />
-            {report.files_scanned.toLocaleString()} files scanned ·{" "}
-            {humanBytes(report.total_reclaimable - reclaimed)} reclaimable
+            {displayedReport.files_scanned.toLocaleString()} files scanned ·{" "}
+            {humanBytes(displayedReport.total_reclaimable - reclaimed)} reclaimable
           </p>
+          {showingPreview && (
+            <p className="preview-note">
+              Early results are appearing now. Final safety checks and actions unlock when
+              the scan finishes.
+            </p>
+          )}
 
           <button onClick={runScan} disabled={scanning}>
             {scanning ? "Scanning…" : "Scan a different folder"}
@@ -627,6 +672,7 @@ export default function App() {
             defaultOpen={true}
             quarantineDir={quarantineDir}
             onQuarantined={handleQuarantined}
+            actionsDisabled={showingPreview}
           />
           <CategorySection
             title="Review first"
@@ -634,6 +680,7 @@ export default function App() {
             defaultOpen={true}
             quarantineDir={quarantineDir}
             onQuarantined={handleQuarantined}
+            actionsDisabled={showingPreview}
           />
           <CategorySection
             title="Risky — not recommended"

@@ -199,3 +199,9 @@ test("the scan panel enters with transform and opacity only", () => {
   const entrance = keyframesBlock("scan-in");
   assert.doesNotMatch(entrance, LAYOUT_PROPS);
 });
+
+
+test("preview rows have a quiet non-action label", () => {
+  assert.match(css, /\.preview-note\s*\{/);
+  assert.match(css, /\.preview-only\s*\{[^}]*opacity\s*:/s);
+});

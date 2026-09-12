@@ -64,3 +64,17 @@ test("cancel still works the same way", () => {
   assert.match(scan, /disabled=\{cancelling\}/);
   assert.match(scan, /cancelling \? "Stopping…" : "Cancel scan"/);
 });
+
+
+test("the app subscribes to provisional scan preview events", () => {
+  assert.match(jsx, /listen\("scan-preview"/);
+  assert.match(jsx, /setPreviewReport\(\(prev\) =>/);
+  assert.match(jsx, /byPath\.set\(finding\.entry\.path, finding\)/);
+  assert.match(jsx, /duplicate_sets:\s*\[\]/);
+});
+
+test("preview findings are not actionable until the final report arrives", () => {
+  assert.match(jsx, /actionsDisabled=\{showingPreview\}/);
+  assert.match(jsx, /Preview only/);
+  assert.match(jsx, /Final safety checks and actions unlock/);
+});
