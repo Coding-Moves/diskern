@@ -462,6 +462,73 @@ mod tests {
     }
 
     #[test]
+    fn additional_project_markers_reference_their_stores() {
+        for (marker, stores) in [
+            ("go.mod", vec!["vendor/pkg/mod.go"]),
+            ("pom.xml", vec!["target/classes/app.class"]),
+            (
+                "build.gradle",
+                vec!["build/classes/App.class", ".gradle/caches/modules.lock"],
+            ),
+            (
+                "build.gradle.kts",
+                vec!["build/classes/App.class", ".gradle/caches/modules.lock"],
+            ),
+            ("Gemfile", vec!["vendor/bundle/ruby/3.3.0/gems/rack.rb"]),
+            (
+                "composer.json",
+                vec!["vendor/monolog/monolog/src/Logger.php"],
+            ),
+            (
+                "pubspec.yaml",
+                vec![".dart_tool/package_config.json", "build/app.dill"],
+            ),
+        ] {
+            for store_file in stores {
+                let marker_path = format!("/repo/app/{marker}");
+                let store_path = format!("/repo/app/{store_file}");
+                let graph = ImpactGraph::from_entries(&entries(&[
+                    marker_path.as_str(),
+                    store_path.as_str(),
+                ]));
+
+                assert_eq!(
+                    graph.referencing_projects(Path::new(&store_path)),
+                    1,
+                    "{marker} should reference {store_file}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shared_store_names_count_one_root_once() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Cargo.toml",
+            "/repo/pom.xml",
+            "/repo/target/debug/app",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/target/debug/app")),
+            1
+        );
+    }
+
+    #[test]
+    fn nested_store_names_stay_specific() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Gemfile",
+            "/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb")),
+            1
+        );
+    }
+
+    #[test]
     fn a_cancelled_build_stops_instead_of_finishing() {
         let cancelled = AtomicBool::new(true);
         assert!(ImpactGraph::from_entries_cancellable(
