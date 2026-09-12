@@ -25,10 +25,31 @@ const PROJECTS: &[(&str, ProjectKind, &[&str])] = &[
     ("cargo.toml", ProjectKind::Cargo, &["target"]),
     ("package.json", ProjectKind::Npm, &["node_modules"]),
     ("pyproject.toml", ProjectKind::Python, &[".venv", "venv"]),
+    ("go.mod", ProjectKind::Go, &["vendor"]),
+    ("pom.xml", ProjectKind::Maven, &["target"]),
+    ("build.gradle", ProjectKind::Gradle, &["build", ".gradle"]),
+    (
+        "build.gradle.kts",
+        ProjectKind::Gradle,
+        &["build", ".gradle"],
+    ),
+    ("gemfile", ProjectKind::Ruby, &["vendor/bundle"]),
+    ("composer.json", ProjectKind::Php, &["vendor"]),
+    ("pubspec.yaml", ProjectKind::Dart, &[".dart_tool", "build"]),
 ];
 
-/// Directory names that are dependency stores wherever they appear.
-const STORE_NAMES: &[&str] = &["target", "node_modules", ".venv", "venv"];
+/// Directory names or relative paths that are dependency stores wherever they appear.
+const STORE_NAMES: &[&str] = &[
+    "target",
+    "node_modules",
+    ".venv",
+    "venv",
+    "vendor",
+    "vendor/bundle",
+    "build",
+    ".gradle",
+    ".dart_tool",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Node {
@@ -42,6 +63,12 @@ pub enum ProjectKind {
     Cargo,
     Npm,
     Python,
+    Go,
+    Maven,
+    Gradle,
+    Ruby,
+    Php,
+    Dart,
     Unknown,
 }
 
@@ -148,7 +175,9 @@ impl ImpactGraph {
                         kind: *kind,
                     });
                     let to = graph.node(Node::DependencyStore(store));
-                    graph.graph.add_edge(from, to, Edge::References);
+                    if graph.graph.find_edge(from, to).is_none() {
+                        graph.graph.add_edge(from, to, Edge::References);
+                    }
                 }
             }
         }
@@ -196,19 +225,32 @@ impl ImpactGraph {
 /// Outermost, not nearest: `proj/node_modules/a/node_modules/b` belongs to
 /// `proj/node_modules`, which is the store a project actually references.
 fn enclosing_store(path: &Path) -> Option<PathBuf> {
-    let mut found = None;
+    let mut found: Option<(PathBuf, usize)> = None;
     let mut current = path.parent();
     while let Some(dir) = current {
-        if dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| STORE_NAMES.contains(&n))
-        {
-            found = Some(dir.to_path_buf());
+        if let Some(store_len) = matching_store_len(dir) {
+            match &found {
+                // Prefer the outermost store for repeated single-name stores
+                // like nested node_modules, but keep a more specific nested
+                // store such as vendor/bundle instead of widening it to vendor.
+                Some((_, found_len)) if *found_len > store_len => {}
+                _ => found = Some((dir.to_path_buf(), store_len)),
+            }
         }
         current = dir.parent();
     }
-    found
+    found.map(|(path, _)| path)
+}
+
+fn matching_store_len(path: &Path) -> Option<usize> {
+    STORE_NAMES
+        .iter()
+        .filter_map(|store| {
+            let store_path = Path::new(store);
+            path.ends_with(store_path)
+                .then(|| store_path.components().count())
+        })
+        .max()
 }
 
 /// Which kind of project a file marks, if it marks one.
