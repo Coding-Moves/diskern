@@ -22,6 +22,12 @@ All notable changes to Diskern are documented here. The format follows
   instantly, quarantine/restore/purge controls fade between their idle,
   confirm and working states, and working labels show a small spinner —
   all covered by the reduced-motion setting above
+- The desktop app's scanning state is now a branded panel: a shield mark
+  pulses gently beside "Scanning safely… nothing is being changed", the
+  live file and byte counters keep ticking underneath, the indeterminate
+  sweep animates on transforms so it cannot shift layout, and cancelling
+  settles into a dimmed, motionless state — all covered by the same
+  reduced-motion setting
 
 ### Fixed
 

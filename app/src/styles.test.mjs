@@ -27,6 +27,27 @@ function reducedMotionBlock() {
   return css.slice(start, end - 1);
 }
 
+// Same brace-walk for a `@keyframes <name> { … }` body.
+function keyframesBlock(name) {
+  const marker = new RegExp(`@keyframes\\s+${name}\\s*\\{`);
+  const match = marker.exec(css);
+  assert.ok(match, `styles.css must define @keyframes ${name}`);
+
+  const start = match.index + match[0].length;
+  let depth = 1;
+  let end = start;
+  for (; end < css.length && depth > 0; end++) {
+    if (css[end] === "{") depth++;
+    if (css[end] === "}") depth--;
+  }
+  return css.slice(start, end - 1);
+}
+
+// Layout-affecting properties: animating these is what would make the
+// scan panel shift layout or feel jumpy.
+const LAYOUT_PROPS =
+  /(?:^|[{;\s])(?:left|right|top|bottom|width|height|margin|padding)\s*:/;
+
 test("the stylesheet handles prefers-reduced-motion", () => {
   assert.match(css, /@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)/);
 });
@@ -113,4 +134,68 @@ test("scan progress exposes a readable phase label", () => {
     /\.progress-phase\s*\{[^}]*font-weight\s*:\s*600\b/s,
     "the phase should read as the main scan status, above the numeric counter"
   );
+});
+
+test("the scanning state is a branded panel, not a bare bar", () => {
+  assert.match(
+    css,
+    /\.scan-progress\s*\{[^}]*border\s*:[^}]*border-radius\s*:/s,
+    "the scan panel needs a bordered card treatment"
+  );
+  assert.match(css, /\.scan-mark\s*\{/, "a brand/shield mark must be styled");
+  assert.match(css, /\.scan-status\s*\{[^}]*font-weight\s*:\s*600\b/s);
+});
+
+test("the scan mark pulses through transform and opacity only", () => {
+  assert.match(css, /\.scan-mark\s*\{[^}]*animation\s*:[^}]*\bscan-pulse\b/s);
+  const pulse = keyframesBlock("scan-pulse");
+  assert.match(pulse, /opacity\s*:/);
+  assert.match(pulse, /transform\s*:/);
+  assert.doesNotMatch(
+    pulse,
+    LAYOUT_PROPS,
+    "the pulse must not animate layout properties"
+  );
+});
+
+test("the indeterminate sweep animates transform, never layout", () => {
+  const sweep = keyframesBlock("indeterminate");
+  assert.match(
+    sweep,
+    /transform\s*:\s*translateX\(/,
+    "the sweep should move with translateX so it stays off layout"
+  );
+  assert.doesNotMatch(
+    sweep,
+    LAYOUT_PROPS,
+    "animating left/top/width/height would shift layout every frame"
+  );
+});
+
+test("cancelling calms the panel instead of snapping it away", () => {
+  assert.match(
+    css,
+    /\.scan-progress\.cancelling\s*\{[^}]*opacity\s*:/s,
+    "the cancelling panel should dim, not vanish"
+  );
+  assert.match(
+    css,
+    /\.scan-progress\.cancelling[^{]*\.progress-fill-indeterminate\s*\{[^}]*animation-play-state\s*:\s*paused/s,
+    "the sweep should freeze in place while the scan stops"
+  );
+  assert.match(
+    css,
+    /\.scan-progress\.cancelling[^{]*\.scan-mark\b[^{]*\{[^}]*animation-play-state\s*:\s*paused/s,
+    "the shield pulse should freeze too"
+  );
+});
+
+test("the scan panel enters with transform and opacity only", () => {
+  assert.match(
+    css,
+    /\.scan-progress\s*\{[^}]*animation\s*:[^}]*\bscan-in\b/s,
+    "the panel mounts on scan start and needs a short entrance"
+  );
+  const entrance = keyframesBlock("scan-in");
+  assert.doesNotMatch(entrance, LAYOUT_PROPS);
 });
