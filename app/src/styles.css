@@ -125,3 +125,25 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .purge { margin-top: 0.75rem; }
 .purge .confirm { flex-wrap: wrap; }
 .purge .confirm-q { color: #c0392b; opacity: 1; }
+
+/* Reduced motion: when the OS asks for less animation, every transition
+   and animation collapses to a near-instant single pass — state changes
+   still read clearly, but nothing sweeps, pulses or loops. The scan bar
+   is pinned to a steady partial fill instead of letting its one-shot pass
+   freeze at an arbitrary offset; the live file count beneath it is the
+   real "still working" signal anyway. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .progress-fill-indeterminate {
+    animation: none;
+    left: 30%;
+  }
+}
