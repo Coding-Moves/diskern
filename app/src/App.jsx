@@ -23,6 +23,16 @@ const CATEGORY_LABEL = {
 // and the Rust command re-checks server-side anyway (defense in depth).
 const ACTIONABLE_VERDICTS = new Set(["safe", "review"]);
 
+// First page a long list mounts; the rest stays out of the DOM behind a
+// Show more / Show less toggle. A big report can carry thousands of
+// findings, and mounting every row up front is what makes scrolling and
+// section expands heavy — the cap is the cheap fix the issue asks for.
+// Paths cap lower: they are tiny nodes, but a hardlink-heavy duplicate
+// set can hold hundreds of them.
+const FINDINGS_CAP = 100;
+const DUP_SETS_CAP = 100;
+const DUP_PATHS_CAP = 25;
+
 function groupFindings(findings) {
   const groups = { safe: [], review: [], risky: [], protected: [] };
   for (const f of findings) {
@@ -132,6 +142,30 @@ function FindingRow({ f, quarantineDir, onQuarantined, actionsDisabled = false }
   );
 }
 
+/**
+ * A list that mounts only its first `cap` items, with a quiet toggle to
+ * reveal the rest and cap it again. Keeping the expanded flag inside the
+ * helper means every list caps itself independently — each category
+ * block, the duplicate panel and each set's path list get their own —
+ * and a fresh scan starts capped again because the sections remount.
+ * Short lists render exactly as before: same markup, no button.
+ */
+function CappedList({ tag: Tag = "ul", className, items, cap, renderItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, cap);
+  const hidden = items.length - cap;
+  return (
+    <>
+      <Tag className={className}>{visible.map(renderItem)}</Tag>
+      {hidden > 0 && (
+        <button className="list-toggle" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Show less" : `Show ${hidden} more`}
+        </button>
+      )}
+    </>
+  );
+}
+
 function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantined, actionsDisabled = false }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   if (items.length === 0) return null;
@@ -153,8 +187,11 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
           {byCategory(items).map(([cat, catItems]) => (
             <div key={cat} className="category-block">
               <h4>{CATEGORY_LABEL[cat] ?? cat}</h4>
-              <ul className="findings">
-                {catItems.map((f) => (
+              <CappedList
+                className="findings"
+                items={catItems}
+                cap={FINDINGS_CAP}
+                renderItem={(f) => (
                   <FindingRow
                     key={f.entry.path}
                     f={f}
@@ -162,8 +199,8 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
                     onQuarantined={onQuarantined}
                     actionsDisabled={actionsDisabled}
                   />
-                ))}
-              </ul>
+                )}
+              />
             </div>
           ))}
         </div>
@@ -188,19 +225,26 @@ function DuplicatesSection({ sets }) {
       </button>
       <div className={`group-body${isOpen ? " open" : ""}`}>
         <div className="group-body-inner">
-          {sets.map((set, i) => (
-            <div key={i} className="dup-set">
-              <div className="dup-set-header">
-                {set.paths.length} copies · {humanBytes(set.size)} each ·{" "}
-                {humanBytes(set.wasted)} wasted
+          <CappedList
+            tag="div"
+            className="dup-sets"
+            items={sets}
+            cap={DUP_SETS_CAP}
+            renderItem={(set, i) => (
+              <div key={i} className="dup-set">
+                <div className="dup-set-header">
+                  {set.paths.length} copies · {humanBytes(set.size)} each ·{" "}
+                  {humanBytes(set.wasted)} wasted
+                </div>
+                <CappedList
+                  className="dup-paths"
+                  items={set.paths}
+                  cap={DUP_PATHS_CAP}
+                  renderItem={(p, j) => <li key={j}>{p}</li>}
+                />
               </div>
-              <ul className="dup-paths">
-                {set.paths.map((p, j) => (
-                  <li key={j}>{p}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+            )}
+          />
         </div>
       </div>
     </section>

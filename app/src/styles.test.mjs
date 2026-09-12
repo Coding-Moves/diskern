@@ -205,3 +205,13 @@ test("preview rows have a quiet non-action label", () => {
   assert.match(css, /\.preview-note\s*\{/);
   assert.match(css, /\.preview-only\s*\{[^}]*opacity\s*:/s);
 });
+
+test("the show-more toggle is a quiet secondary button", () => {
+  assert.match(css, /\.list-toggle\s*\{[^}]*border\s*:/s);
+  assert.match(css, /\.list-toggle\s*\{[^}]*background\s*:\s*none\b/s);
+  assert.match(
+    css,
+    /\.list-toggle\s*\{[^}]*opacity\s*:/s,
+    "the cap is a performance detail — it should not compete with real actions"
+  );
+});

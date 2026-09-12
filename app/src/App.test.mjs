@@ -78,3 +78,65 @@ test("preview findings are not actionable until the final report arrives", () =>
   assert.match(jsx, /Preview only/);
   assert.match(jsx, /Final safety checks and actions unlock/);
 });
+
+// The CappedList helper — from its declaration to the CategorySection
+// that follows it — is what keeps big reports from flooding the DOM.
+const cappedList = jsx.slice(
+  jsx.indexOf("function CappedList"),
+  jsx.indexOf("function CategorySection")
+);
+assert.ok(cappedList.length > 0, "App.jsx must define CappedList");
+
+test("long lists mount only a first page of rows", () => {
+  assert.match(
+    cappedList,
+    /expanded \? items : items\.slice\(0, cap\)/,
+    "collapsed lists must render a slice, not the whole array"
+  );
+  assert.match(
+    cappedList,
+    /useState\(false\)/,
+    "each list owns its expanded flag so sections cap themselves independently"
+  );
+});
+
+test("the toggle reveals the rest and can cap the list again", () => {
+  assert.match(
+    cappedList,
+    /hidden > 0 && \(/,
+    "no button when every item already fits"
+  );
+  assert.match(cappedList, /`Show \$\{hidden\} more`/);
+  assert.match(cappedList, /Show less/);
+  assert.match(cappedList, /setExpanded\(\(v\) => !v\)/);
+});
+
+test("every findings category is capped at the issue's suggested page", () => {
+  assert.match(jsx, /const FINDINGS_CAP = 100;/);
+  assert.match(
+    jsx,
+    /<CappedList[^>]*className="findings"[^>]*items=\{catItems\}[^>]*cap=\{FINDINGS_CAP\}/s,
+    "category blocks must render finding rows through the cap"
+  );
+});
+
+test("duplicate sets and their paths are capped too", () => {
+  assert.match(jsx, /const DUP_SETS_CAP = 100;/);
+  assert.match(jsx, /const DUP_PATHS_CAP = 25;/);
+  assert.match(
+    jsx,
+    /<CappedList[^>]*items=\{sets\}[^>]*cap=\{DUP_SETS_CAP\}/s,
+    "the duplicates panel must cap the number of sets it mounts"
+  );
+  assert.match(
+    jsx,
+    /<CappedList[^>]*items=\{set\.paths\}[^>]*cap=\{DUP_PATHS_CAP\}/s,
+    "a set with many paths must not render them all at once"
+  );
+});
+
+test("capped lists keep the same list markup as before", () => {
+  assert.match(cappedList, /<Tag className=\{className\}>/);
+  assert.match(jsx, /className="findings"/);
+  assert.match(jsx, /className="dup-paths"/);
+});
