@@ -8,6 +8,9 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Added
 
+- Desktop scans now stream provisional finding rows while the walk is still
+  running, then replace them with the final graph- and duplicate-checked report
+  before any quarantine action is offered
 - The CLI now exposes the deterministic AI narration seam with `diskern scan
   --explain`, summarising the finished report without changing verdicts or actions
 - Desktop scans now show which stage is running after the file walk, so
