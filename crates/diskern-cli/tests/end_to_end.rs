@@ -123,6 +123,84 @@ fn scan_prints_findings_grouped_by_verdict_safest_first() {
     );
 }
 
+/// Issue #100. A risky finding's `reclaimable` is deliberately zero —
+/// nothing offers to move it — so printing it as the row's size showed
+/// `0 B` for every risky file, hiding how big the file actually is. The
+/// row now shows the file's real size, while the section's totals keep
+/// reporting reclaimable bytes and say so.
+#[test]
+fn risky_rows_show_file_size_while_totals_report_reclaimable() {
+    let root = tempdir().unwrap();
+    write_verdict_fixture(root.path());
+
+    let output = scan(root.path(), &["--top", "0"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let risky = at(&stdout, "Risky — not recommended");
+    let protected = at(&stdout, "Protected — do not touch");
+    let risky_section = &stdout[risky..protected];
+
+    // Both totals in the section still report reclaimable bytes — 0, as
+    // nothing here is on offer — and say so, so the label does the work
+    // the bare `0 B` could not.
+    assert!(
+        risky_section.contains("1 finding · 0 B reclaimable"),
+        "risky heading does not label its total:\n{risky_section}"
+    );
+    assert!(
+        risky_section.contains("Build artifacts · 1 · 0 B reclaimable"),
+        "risky category does not label its subtotal:\n{risky_section}"
+    );
+
+    // ...while the row shows the fixture's real 512 bytes, not the
+    // reclaimable zero that used to print there.
+    let row = risky_section
+        .lines()
+        .find(|line| line.contains("index.js"))
+        .unwrap_or_else(|| panic!("no risky row in:\n{risky_section}"));
+    assert!(
+        row.contains("512 B"),
+        "risky row hides the file's real size:\n{risky_section}"
+    );
+    assert!(
+        !row.contains("0 B"),
+        "risky row still prints the reclaimable zero:\n{risky_section}"
+    );
+
+    // Actionable sections are untouched: rows still show reclaimable
+    // bytes, and totals carry no label — a newline, not " reclaimable",
+    // ends the heading.
+    let safe_section = &stdout[at(&stdout, "Safe to remove")..at(&stdout, "Review first")];
+    assert!(
+        safe_section.contains("Safe to remove — 1 finding · 4.1 KB\n"),
+        "safe heading picked up the risky label:\n{safe_section}"
+    );
+    let safe_row = safe_section
+        .lines()
+        .find(|line| line.contains("data_0"))
+        .unwrap_or_else(|| panic!("no safe row in:\n{safe_section}"));
+    assert!(
+        safe_row.contains("4.1 KB"),
+        "safe row no longer shows reclaimable bytes:\n{safe_section}"
+    );
+
+    let review_section = &stdout[at(&stdout, "Review first")..risky];
+    let review_row = review_section
+        .lines()
+        .find(|line| line.contains("setup.dmg"))
+        .unwrap_or_else(|| panic!("no review row in:\n{review_section}"));
+    assert!(
+        review_row.contains("2.0 KB"),
+        "review row no longer shows reclaimable bytes:\n{review_section}"
+    );
+}
+
 #[test]
 fn scan_json_emits_a_parseable_report_with_the_promised_fields() {
     let root = tempdir().unwrap();
