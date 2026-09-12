@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
+import { visibleDuplicateSets } from "./duplicates.js";
 import { runAppOperation } from "./updateCoordinator.js";
 
 const CATEGORY_LABEL = {
@@ -421,6 +422,11 @@ export default function App() {
     [report, visibleFindings]
   );
 
+  const duplicateSets = useMemo(
+    () => (report ? visibleDuplicateSets(report.duplicate_sets, quarantinedPaths) : []),
+    [report, quarantinedPaths]
+  );
+
   function handleQuarantined(finding) {
     setQuarantinedPaths((prev) => {
       const next = new Set(prev);
@@ -578,7 +584,7 @@ export default function App() {
             onRestored={handleRestored}
           />
 
-          <DuplicatesSection sets={report.duplicate_sets} />
+          <DuplicatesSection sets={duplicateSets} />
           <CategorySection
             title="Safe to remove"
             items={groups.safe}

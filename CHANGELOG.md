@@ -16,6 +16,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The desktop duplicate panel now hides quarantined paths and recalculates
+  wasted bytes after quarantine or restore actions
 - Desktop updates now wait while scan, quarantine, restore, or purge operations
   are running, and new file operations are blocked once update installation
   starts
