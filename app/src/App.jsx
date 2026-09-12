@@ -139,14 +139,16 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
   return (
     <section className="verdict-group">
       <button className="group-header" onClick={() => setIsOpen(!isOpen)}>
-        <span className="chevron">{isOpen ? "▾" : "▸"}</span>
+        <span className={`chevron${isOpen ? " open" : ""}`}>▸</span>
         {title}
         <span className="group-meta">
           {items.length} item{items.length === 1 ? "" : "s"} · {bytesToGB(total)} GB
         </span>
       </button>
-      {isOpen && (
-        <div className="group-body">
+      {/* The body stays mounted when closed so CSS can animate the
+          collapse; visibility:hidden keeps it out of the tab order. */}
+      <div className={`group-body${isOpen ? " open" : ""}`}>
+        <div className="group-body-inner">
           {byCategory(items).map(([cat, catItems]) => (
             <div key={cat} className="category-block">
               <h4>{CATEGORY_LABEL[cat] ?? cat}</h4>
@@ -163,7 +165,7 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
             </div>
           ))}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -176,14 +178,14 @@ function DuplicatesSection({ sets }) {
   return (
     <section className="verdict-group duplicates">
       <button className="group-header" onClick={() => setIsOpen(!isOpen)}>
-        <span className="chevron">{isOpen ? "▾" : "▸"}</span>
+        <span className={`chevron${isOpen ? " open" : ""}`}>▸</span>
         Duplicate files
         <span className="group-meta">
           {sets.length} set{sets.length === 1 ? "" : "s"} · {bytesToGB(total)} GB wasted
         </span>
       </button>
-      {isOpen && (
-        <div className="group-body">
+      <div className={`group-body${isOpen ? " open" : ""}`}>
+        <div className="group-body-inner">
           {sets.map((set, i) => (
             <div key={i} className="dup-set">
               <div className="dup-set-header">
@@ -198,7 +200,7 @@ function DuplicatesSection({ sets }) {
             </div>
           ))}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -280,14 +282,14 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
   return (
     <section className="verdict-group quarantine">
       <button className="group-header" onClick={() => setIsOpen(!isOpen)}>
-        <span className="chevron">{isOpen ? "▾" : "▸"}</span>
+        <span className={`chevron${isOpen ? " open" : ""}`}>▸</span>
         Quarantine
         <span className="group-meta">
           {records.length} file{records.length === 1 ? "" : "s"} · reversible
         </span>
       </button>
-      {isOpen && (
-        <div className="group-body">
+      <div className={`group-body${isOpen ? " open" : ""}`}>
+        <div className="group-body-inner">
           <p className="quarantine-note">
             Moved here, not deleted. Restore puts a file back where it came from.
             Purge is the only thing in Diskern that deletes, and it deletes only
@@ -341,7 +343,7 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
           {purgeNotice && <p className="notice">{purgeNotice}</p>}
           {error && <p className="error">{error}</p>}
         </div>
-      )}
+      </div>
     </section>
   );
 }
