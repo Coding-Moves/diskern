@@ -34,6 +34,38 @@ fn scan_with_single_duplicate_set_prints_singular_summary() {
 }
 
 #[test]
+fn scan_summary_says_file_for_one_and_files_for_two() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("only.bin"), b"data").unwrap();
+
+    let output = run_scan(root.path());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Scanned 1 file."),
+        "expected 'Scanned 1 file.', got: {stdout}"
+    );
+
+    // A second, different file keeps the count at two and the plural intact.
+    fs::write(root.path().join("second.bin"), b"more data").unwrap();
+    let output = run_scan(root.path());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Scanned 2 files."),
+        "expected 'Scanned 2 files.', got: {stdout}"
+    );
+}
+
+#[test]
 fn scan_with_single_finding_prints_singular_summary() {
     let root = tempdir().unwrap();
     let cache = root.path().join(".cache/google-chrome/Default/Cache");

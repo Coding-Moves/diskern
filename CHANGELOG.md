@@ -6,6 +6,11 @@ All notable changes to Diskern are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The CLI scan summary now says "1 file" instead of "1 files" when a
+  scan sees exactly one file
+
 ## [0.3.0] — 2026-09-12
 
 ### Changed

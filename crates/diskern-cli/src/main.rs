@@ -244,7 +244,11 @@ fn main() -> Result<()> {
                 }
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("Scanned {} files.", report.files_scanned);
+                println!(
+                    "Scanned {} file{}.",
+                    report.files_scanned,
+                    plural(report.files_scanned as usize)
+                );
                 if let Some(path) = external_rules {
                     println!("Rules: external database — {}", path.display());
                 }
