@@ -99,7 +99,7 @@ fn scan_excludes_cli_directories() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Scanned 1 files."),
+        stdout.contains("Scanned 1 file."),
         "expected excluded directory to be skipped, got: {stdout}"
     );
 }
