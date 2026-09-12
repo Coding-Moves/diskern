@@ -177,8 +177,13 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   0%   { left: -40%; }
   100% { left: 100%; }
 }
-.progress-count {
+.progress-phase {
   margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.progress-count {
+  margin: 0.25rem 0 0;
   font-size: 0.85rem;
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
