@@ -1,4 +1,4 @@
-use diskern_core::{actions, report, rules::RulesDb, scanner, GenomeError};
+use diskern_core::{actions, report, report::ReportStage, rules::RulesDb, scanner, GenomeError};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -154,10 +154,47 @@ impl ScanAuthority {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ScanPhase {
+    WalkingFiles,
+    BuildingImpactGraph,
+    ClassifyingFiles,
+    CheckingDuplicates,
+    PreparingFindings,
+}
+
+impl ScanPhase {
+    fn label(self) -> &'static str {
+        match self {
+            ScanPhase::WalkingFiles => "Walking files",
+            ScanPhase::BuildingImpactGraph => "Building project impact graph",
+            ScanPhase::ClassifyingFiles => "Classifying files",
+            ScanPhase::CheckingDuplicates => "Checking duplicate candidates",
+            ScanPhase::PreparingFindings => "Preparing findings",
+        }
+    }
+}
+
+fn set_scan_phase(phase: &Mutex<ScanPhase>, next: ScanPhase) {
+    *phase
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+}
+
+fn phase_for_report_stage(stage: ReportStage) -> ScanPhase {
+    match stage {
+        ReportStage::BuildingImpactGraph => ScanPhase::BuildingImpactGraph,
+        ReportStage::ClassifyingEntries => ScanPhase::ClassifyingFiles,
+        ReportStage::FindingDuplicates => ScanPhase::CheckingDuplicates,
+        ReportStage::PreparingFindings => ScanPhase::PreparingFindings,
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct ScanProgressPayload {
     files_seen: u64,
     bytes_seen: u64,
+    phase: &'static str,
 }
 
 /// Everything a running scan owns outside itself: the ticker thread that
@@ -183,6 +220,7 @@ impl<'a> ScanRun<'a> {
         state: &'a ScanAuthority,
         generation: u64,
         progress: Arc<scanner::ScanProgress>,
+        phase: Arc<Mutex<ScanPhase>>,
     ) -> Self {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -190,13 +228,18 @@ impl<'a> ScanRun<'a> {
         // runtime Tauri is using internally.
         let ticker = {
             let progress = progress.clone();
+            let phase = phase.clone();
             let stop = stop.clone();
             let window = window.clone();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
+                    let phase = *phase
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let payload = ScanProgressPayload {
                         files_seen: progress.files_seen.load(Ordering::Relaxed),
                         bytes_seen: progress.bytes_seen.load(Ordering::Relaxed),
+                        phase: phase.label(),
                     };
                     let _ = window.emit("scan-progress", payload);
                     std::thread::sleep(Duration::from_millis(150));
@@ -245,12 +288,20 @@ pub async fn start_scan(
     let progress = Arc::new(scanner::ScanProgress::default());
     let authority = state.inner().clone();
     let generation = authority.begin(progress.clone());
+    let phase = Arc::new(Mutex::new(ScanPhase::WalkingFiles));
 
     // Everything this scan has to undo, undone on the way out however the
     // way out happens.
-    let run = ScanRun::start(&window, &authority, generation, progress.clone());
+    let run = ScanRun::start(
+        &window,
+        &authority,
+        generation,
+        progress.clone(),
+        phase.clone(),
+    );
 
     let progress_for_scan = progress.clone();
+    let phase_for_scan = phase.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
         let opts = scanner::ScanOptions {
             roots,
@@ -260,10 +311,12 @@ pub async fn start_scan(
             // build_cancellable also returns None when cancelled — the walk
             // is only the first half, and dedup hashing is where a cancel
             // most needs to land.
-            Ok(entries) => Ok(report::build_cancellable(
+            Ok(entries) => Ok(report::build_with_progress(
                 entries,
                 &RulesDb::embedded(),
+                &report::ReportOptions::default(),
                 &progress_for_scan.cancelled,
+                |stage| set_scan_phase(&phase_for_scan, phase_for_report_stage(stage)),
             )),
             // The user asked for this. `None` means "cancelled", which the
             // frontend renders as an outcome rather than a red error box.
@@ -274,11 +327,15 @@ pub async fn start_scan(
     .await;
 
     // One final snapshot so the UI's last-seen count matches the real total.
+    let phase = *phase
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _ = window.emit(
         "scan-progress",
         ScanProgressPayload {
             files_seen: progress.files_seen.load(Ordering::Relaxed),
             bytes_seen: progress.bytes_seen.load(Ordering::Relaxed),
+            phase: phase.label(),
         },
     );
 
@@ -447,6 +504,26 @@ mod tests {
             total_reclaimable: metadata.len(),
             files_scanned: 1,
         }
+    }
+
+    #[test]
+    fn report_stages_map_to_user_visible_scan_phases() {
+        assert_eq!(
+            phase_for_report_stage(ReportStage::BuildingImpactGraph).label(),
+            "Building project impact graph"
+        );
+        assert_eq!(
+            phase_for_report_stage(ReportStage::ClassifyingEntries).label(),
+            "Classifying files"
+        );
+        assert_eq!(
+            phase_for_report_stage(ReportStage::FindingDuplicates).label(),
+            "Checking duplicate candidates"
+        );
+        assert_eq!(
+            phase_for_report_stage(ReportStage::PreparingFindings).label(),
+            "Preparing findings"
+        );
     }
 
     #[test]

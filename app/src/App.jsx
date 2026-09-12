@@ -354,12 +354,13 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
  * of files found so far (proof of life) plus an animated indeterminate
  * bar (motion reads as "working," not "frozen").
  */
-function ScanningIndicator({ filesSeen, bytesSeen, onCancel, cancelling }) {
+function ScanningIndicator({ filesSeen, bytesSeen, phase, onCancel, cancelling }) {
   return (
     <div className="scan-progress">
       <div className="progress-track">
         <div className="progress-fill-indeterminate" />
       </div>
+      <p className="progress-phase">{phase || "Walking files"}</p>
       <p className="progress-count">
         {filesSeen.toLocaleString()} files found
         {bytesSeen > 0 && <> · {humanBytes(bytesSeen)} so far</>}
@@ -382,7 +383,11 @@ export default function App() {
   // Set when a scan ends because the user stopped it. Not an error — it
   // renders as a plain note, and any previous report stays on screen.
   const [notice, setNotice] = useState(null);
-  const [liveProgress, setLiveProgress] = useState({ files_seen: 0, bytes_seen: 0 });
+  const [liveProgress, setLiveProgress] = useState({
+    files_seen: 0,
+    bytes_seen: 0,
+    phase: "Walking files",
+  });
   // Paths already quarantined this session, and the bytes they accounted for.
   // Rows in this set are filtered out of the view; reclaimed is subtracted
   // from the headline total.
@@ -484,7 +489,7 @@ export default function App() {
         setScannedFolder(null);
         setQuarantinedPaths(new Set());
         setReclaimed(0);
-        setLiveProgress({ files_seen: 0, bytes_seen: 0 });
+        setLiveProgress({ files_seen: 0, bytes_seen: 0, phase: "Walking files" });
         setScanning(true);
         setCancelling(false);
 
@@ -538,6 +543,7 @@ export default function App() {
             <ScanningIndicator
               filesSeen={liveProgress.files_seen}
               bytesSeen={liveProgress.bytes_seen}
+              phase={liveProgress.phase}
               onCancel={cancelScan}
               cancelling={cancelling}
             />
@@ -570,6 +576,7 @@ export default function App() {
             <ScanningIndicator
               filesSeen={liveProgress.files_seen}
               bytesSeen={liveProgress.bytes_seen}
+              phase={liveProgress.phase}
               onCancel={cancelScan}
               cancelling={cancelling}
             />

@@ -8,6 +8,8 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Added
 
+- Desktop scans now show which stage is running after the file walk, so
+  long impact-graph, classification, and duplicate checks no longer look frozen
 - npm download caches are now classified as safe package-manager cache files
 - The desktop app now honours the `prefers-reduced-motion` OS/browser
   setting, so the scan progress bar and any future animations or

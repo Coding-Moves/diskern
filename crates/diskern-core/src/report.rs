@@ -8,6 +8,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportStage {
+    BuildingImpactGraph,
+    ClassifyingEntries,
+    FindingDuplicates,
+    PreparingFindings,
+}
+
 /// Knobs for [`build_with`] that are about the report, not the walk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportOptions {
@@ -55,11 +63,32 @@ pub fn build_cancellable(
 
 /// [`build_cancellable`] with the report knobs spelled out.
 pub fn build_with(
-    mut entries: Vec<FileEntry>,
+    entries: Vec<FileEntry>,
     rules: &RulesDb,
     opts: &ReportOptions,
     cancelled: &AtomicBool,
 ) -> Option<Report> {
+    build_with_progress(entries, rules, opts, cancelled, |_| {})
+}
+
+/// [`build_with`] plus coarse stage callbacks for UI progress.
+///
+/// This is intentionally phase-level, not partial findings. The impact graph
+/// must see every entry before it can make verdicts more cautious, and dedup
+/// must see every actionable same-size file before it can say which copies are
+/// redundant. A future streaming design can emit provisional findings, but it
+/// needs an explicit "not actionable yet" contract rather than pretending the
+/// final report exists before these stages finish.
+pub fn build_with_progress<F>(
+    mut entries: Vec<FileEntry>,
+    rules: &RulesDb,
+    opts: &ReportOptions,
+    cancelled: &AtomicBool,
+    mut progress: F,
+) -> Option<Report>
+where
+    F: FnMut(ReportStage),
+{
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -69,6 +98,7 @@ pub fn build_with(
     // at, worked out from the same entries the rest of the pipeline sees,
     // so a `node_modules` three live projects depend on can be told apart
     // from an abandoned one.
+    progress(ReportStage::BuildingImpactGraph);
     let impact = graph::ImpactGraph::from_entries_cancellable(&entries, cancelled)?;
 
     // Classify before dedup, not after. A file nothing will act on has no
@@ -78,6 +108,7 @@ pub fn build_with(
     //
     // Classification is cheap per entry, but a home directory is millions
     // of them, so it happens once and the answer is kept.
+    progress(ReportStage::ClassifyingEntries);
     let mut verdicts: Vec<Classified> = Vec::with_capacity(entries.len());
     for entry in &entries {
         if cancelled.load(Ordering::Relaxed) {
@@ -95,6 +126,7 @@ pub fn build_with(
         });
     }
 
+    progress(ReportStage::FindingDuplicates);
     let duplicate_sets = dedup::find_duplicates_filtered(
         &mut entries,
         |i, e| e.size >= opts.dedup_min_size && is_actionable(verdicts[i].verdict),
@@ -102,6 +134,7 @@ pub fn build_with(
     )?;
     let files_scanned = entries.len() as u64;
 
+    progress(ReportStage::PreparingFindings);
     let mut findings = Vec::new();
     let mut counted_identities = HashSet::new();
     for (entry, class) in entries.into_iter().zip(verdicts) {
@@ -266,6 +299,41 @@ mod tests {
             ..Default::default()
         };
         scan(&opts, Arc::new(ScanProgress::default())).unwrap()
+    }
+
+    #[test]
+    fn build_reports_coarse_progress_stages() {
+        let cancelled = AtomicBool::new(false);
+        let entries = vec![FileEntry {
+            path: std::path::PathBuf::from("/tmp/dk-scratch/cache.bin"),
+            size: 4,
+            modified: None,
+            accessed: None,
+            is_symlink: false,
+            identity: None,
+            hash: None,
+        }];
+        let mut stages = Vec::new();
+
+        let report = build_with_progress(
+            entries,
+            &temp_rules(),
+            &ReportOptions::default(),
+            &cancelled,
+            |stage| stages.push(stage),
+        )
+        .unwrap();
+
+        assert_eq!(report.files_scanned, 1);
+        assert_eq!(
+            stages,
+            vec![
+                ReportStage::BuildingImpactGraph,
+                ReportStage::ClassifyingEntries,
+                ReportStage::FindingDuplicates,
+                ReportStage::PreparingFindings,
+            ]
+        );
     }
 
     /// Issue #47. `min_file_size` was applied inside the walk, so a file
