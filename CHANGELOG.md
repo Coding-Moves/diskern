@@ -31,6 +31,11 @@ All notable changes to Diskern are documented here. The format follows
 - Desktop updates now wait while scan, quarantine, restore, or purge operations
   are running, and new file operations are blocked once update installation
   starts
+- The desktop app prints sizes in the unit that fits — B, KB, MB, GB or
+  TB — instead of always GB, so small findings no longer read "0.00 GB"
+  and multi-GB rows are no longer four-digit MB numbers. Matches the
+  CLI's `human_bytes`, including the carry that prints 999 999 bytes as
+  "1.0 MB" rather than "1000.0 KB"
 - The CLI scan summary now says "1 file" instead of "1 files" when a
   scan sees exactly one file
 - Removed unused finding categories for duplicate files and empty folders,
