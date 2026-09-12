@@ -156,10 +156,55 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .dup-paths { list-style: none; padding: 0.3rem 0 0; margin: 0; }
 .dup-paths li { font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.7; overflow-wrap: anywhere; }
 
-/* Live scan progress */
-.scan-progress { max-width: 360px; margin: 1rem auto 0; }
+/* Live scan progress: a small branded panel, not just a bare bar. The
+   shield mark says "safe" (scans are read-only), the copy says plainly
+   that nothing is being changed, and every bit of motion is transform or
+   opacity, so nothing can shift layout or feel jumpy. */
+.scan-progress {
+  max-width: 380px;
+  margin: 1.5rem auto 0;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 10px;
+  text-align: left;
+  transition: opacity 200ms ease;
+  animation: scan-in 160ms ease-out;
+}
+/* The panel mounts when a scan starts — the same short entrance idea as
+   action-in on row actions, dropping in rather than sliding sideways. */
+@keyframes scan-in {
+  from { opacity: 0; transform: translateY(0.4rem); }
+  to { opacity: 1; transform: none; }
+}
+.scan-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.scan-mark {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: none;
+  color: #3498db;
+  animation: scan-pulse 2.4s ease-in-out infinite;
+}
+/* The shield breathes rather than spins — patient work, not a countdown.
+   transform/opacity only, so the pulse can never shift layout. */
+@keyframes scan-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.07); }
+}
+.scan-copy { min-width: 0; }
+.scan-status { margin: 0; font-size: 0.92rem; font-weight: 600; }
+.progress-count {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
 .progress-track {
   height: 6px;
+  margin-top: 0.8rem;
   border-radius: 999px;
   background: rgba(128, 128, 128, 0.2);
   overflow: hidden;
@@ -168,14 +213,18 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .progress-fill-indeterminate {
   position: absolute;
   top: 0; bottom: 0;
+  left: 0;
   width: 40%;
   border-radius: 999px;
   background: linear-gradient(90deg, transparent, #3498db, transparent);
-  animation: indeterminate 1.3s ease-in-out infinite;
+  animation: indeterminate 1.4s ease-in-out infinite;
 }
+/* transform, not left: the sweep stays on the compositor and can never
+   nudge layout. The fill is 40% of the track, so -100% of its own width
+   hides it off the left edge and 250% clears the right. */
 @keyframes indeterminate {
-  0%   { left: -40%; }
-  100% { left: 100%; }
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
 }
 .progress-phase {
   margin: 0.5rem 0 0;
@@ -188,6 +237,16 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+/* Cancelling is calm: the sweep and the pulse freeze where they are —
+   pausing keeps the current frame, while re-running the animation would
+   jump — the panel dims a notch, and the copy switches to past tense.
+   The scan is read-only, so there is nothing to undo; the state only
+   has to say "stopping". */
+.scan-progress.cancelling { opacity: 0.7; }
+.scan-progress.cancelling .scan-mark,
+.scan-progress.cancelling .progress-fill-indeterminate {
+  animation-play-state: paused;
+}
 /* Quiet by default: stopping a read-only scan costs nothing, so this
    shouldn't compete with the primary action for attention. */
 .cancel-btn {
@@ -198,6 +257,12 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   border: 1px solid rgba(128, 128, 128, 0.45);
   border-radius: 6px;
   opacity: 0.8;
+}
+/* Inside the scan panel the button centers under the bar; the purge
+   button shares .cancel-btn and keeps its own left-aligned spot. */
+.scan-progress .cancel-btn {
+  display: block;
+  margin: 0.8rem auto 0;
 }
 .cancel-btn:hover:not(:disabled) { opacity: 1; }
 .cancel-btn:disabled { cursor: default; opacity: 0.5; }
@@ -216,8 +281,9 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
    and animation collapses to a near-instant single pass — state changes
    still read clearly, but nothing sweeps, pulses or loops. The scan bar
    is pinned to a steady partial fill instead of letting its one-shot pass
-   freeze at an arbitrary offset; the live file count beneath it is the
-   real "still working" signal anyway. */
+   freeze at an arbitrary offset, and the shield mark settles into a
+   static icon; the live file count beneath is the real "still working"
+   signal anyway. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
