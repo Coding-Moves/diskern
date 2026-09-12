@@ -337,7 +337,7 @@ pub async fn start_scan(
                 // A scan can find many files per second. Emit in modest
                 // batches so the frontend gets early rows without making
                 // every single filesystem entry a cross-thread UI event.
-                if preview_findings.len() % 25 == 0 {
+                if preview_findings.len().is_multiple_of(25) {
                     let _ = window_for_preview.emit(
                         "scan-preview",
                         ScanPreviewPayload {
