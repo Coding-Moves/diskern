@@ -13,12 +13,19 @@ All notable changes to Diskern are documented here. The format follows
   setting, so the scan progress bar and any future animations or
   transitions settle instead of sweeping or looping when reduced motion
   is requested
+- Result sections and file actions in the desktop app now transition
+  smoothly: sections animate open and closed instead of appearing
+  instantly, quarantine/restore/purge controls fade between their idle,
+  confirm and working states, and working labels show a small spinner —
+  all covered by the reduced-motion setting above
 
 ### Fixed
 
 - The CLI scan report now shows a risky finding's real size on its row
   instead of "0 B"; the risky section's totals are labelled "reclaimable"
   so the zero still reads as nothing on offer, never as the file's size
+- The impact graph now recognises Go, Maven, Gradle, Ruby, PHP, and Dart
+  project stores, so live build output is not treated like abandoned data
 - The desktop duplicate panel now hides quarantined paths and recalculates
   wasted bytes after quarantine or restore actions
 - Desktop updates now wait while scan, quarantine, restore, or purge operations

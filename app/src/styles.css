@@ -26,9 +26,43 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   font-size: 1rem;
   font-weight: 600;
 }
-.chevron { width: 1rem; opacity: 0.6; }
+/* The chevron is always ▸ and rotates into ▾, so the direction change
+   animates instead of swapping glyphs. */
+.chevron {
+  width: 1rem;
+  opacity: 0.6;
+  display: inline-block;
+  transition: transform 160ms ease;
+}
+.chevron.open { transform: rotate(90deg); }
 .group-meta { margin-left: auto; font-weight: 400; opacity: 0.7; font-size: 0.85rem; }
-.group-body { padding: 0.25rem 0 0.5rem; }
+/* Section expand/collapse: the 0fr→1fr grid row animates to natural
+   height, so no fixed max-height is needed and long lists can't clip.
+   .group-body stays mounted; visibility flips at the end of a collapse
+   (and the start of an expand), keeping closed content out of the tab
+   order and accessibility tree. overflow:hidden here clips the inner
+   element's padding when the row is 0fr. */
+.group-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 180ms ease,
+    opacity 180ms ease,
+    visibility 180ms;
+}
+.group-body.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+.group-body-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.25rem 0 0.5rem;
+}
 .category-block h4 { margin: 0.75rem 0 0.25rem; font-size: 0.85rem; opacity: 0.8; }
 
 /* Finding rows */
@@ -44,7 +78,19 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 }
 .path { grid-column: 1; font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
 .size { grid-column: 2; font-size: 0.82rem; opacity: 0.8; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row-action { grid-column: 3; justify-self: end; }
+/* min-width pins the auto column to the widest state (the confirm
+   cluster), so idle → confirm → working swaps don't resize the row and
+   the button never jumps. text-align keeps narrower states right-aligned
+   inside the pinned width. */
+.row-action {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 16rem;
+  text-align: right;
+}
+/* Restore rows never reach the confirm cluster — their widest state is
+   the working label, so they pin to a smaller width. */
+.quarantine .row-action { min-width: 6rem; }
 .why { grid-column: 1 / -1; font-size: 0.82rem; opacity: 0.75; }
 
 /* Quarantine action (safe/review rows only) */
@@ -60,7 +106,42 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .confirm-q { font-size: 0.8rem; opacity: 0.8; }
 .confirm-yes { border-color: #c0392b; color: #c0392b; }
 .confirm-no { padding: 0.3rem 0.6rem; font-size: 0.82rem; background: none; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 5px; }
-.working { font-size: 0.82rem; opacity: 0.7; }
+/* Row actions swap idle/confirm/working by replacing elements, so a true
+   crossfade would need JS timers. Instead each new state gets a short
+   fade-and-slide entrance — the swap reads as one smooth change. */
+.row-action > *,
+.purge > *,
+.row-error {
+  animation: action-in 140ms ease-out;
+}
+@keyframes action-in {
+  from { opacity: 0; transform: translateX(0.35rem); }
+  to { opacity: 1; transform: none; }
+}
+.working {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+/* Spinner for Moving…/Restoring…/Deleting…: a ring with one accent arc,
+   rotated by the keyframes. Under reduced motion it collapses to a
+   one-shot pass and freezes on that same ring, which still reads as a
+   busy marker next to the label. */
+.working::before {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid rgba(128, 128, 128, 0.35);
+  border-top-color: currentColor;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(1turn); }
+}
 .row-error {
   grid-column: 1 / -1;
   margin-top: 0.3rem;

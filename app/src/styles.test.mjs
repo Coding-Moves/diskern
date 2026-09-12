@@ -46,3 +46,62 @@ test("the indeterminate scan bar stops sweeping under reduced motion", () => {
     "the looping scan animation must be switched off, not just shortened"
   );
 });
+
+test("section bodies animate expand and collapse through the grid row", () => {
+  // 0fr→1fr animates to natural height — no fixed max-height that could
+  // clip a long findings list.
+  assert.match(css, /\.group-body\s*\{[^}]*grid-template-rows\s*:\s*0fr\b/s);
+  assert.match(css, /\.group-body\.open\s*\{[^}]*grid-template-rows\s*:\s*1fr\b/s);
+  assert.match(
+    css,
+    /\.group-body\s*\{[^}]*transition\s*:[^}]*grid-template-rows\b/s,
+    "the row animation must be a transition, not a jump"
+  );
+  // The clip wrapper is what lets the row shrink below content height.
+  assert.match(css, /\.group-body-inner\s*\{[^}]*min-height\s*:\s*0\b/s);
+  assert.match(css, /\.group-body-inner\s*\{[^}]*overflow\s*:\s*hidden\b/s);
+});
+
+test("a closed section body leaves the tab order", () => {
+  assert.match(
+    css,
+    /\.group-body\s*\{[^}]*visibility\s*:\s*hidden\b/s,
+    "collapsed content must not stay focusable"
+  );
+});
+
+test("row actions fade and slide in on each state change", () => {
+  assert.match(css, /@keyframes\s+action-in\b/);
+  assert.match(
+    css,
+    /\.row-action\s*>\s*\*[^}]*animation\s*:\s*action-in\b/s,
+    "idle/confirm/working swaps need the entrance animation"
+  );
+  assert.match(
+    css,
+    /\.purge\s*>\s*\*[^}]*animation\s*:\s*action-in\b/s,
+    "the purge idle/confirm/working swap needs it too"
+  );
+});
+
+test("working labels carry a spinner", () => {
+  assert.match(css, /@keyframes\s+spin\b/);
+  assert.match(
+    css,
+    /\.working::before\s*\{[^}]*animation\s*:[^}]*\bspin\b/s,
+    "Moving…/Restoring…/Deleting… should spin, not just sit there"
+  );
+});
+
+test("the row-action column is pinned so buttons do not jump", () => {
+  assert.match(
+    css,
+    /\.row-action\s*\{[^}]*min-width\s*:/s,
+    "the auto column must out-size every state so swaps don't resize the row"
+  );
+});
+
+test("the chevron rotates instead of swapping glyphs", () => {
+  assert.match(css, /\.chevron\s*\{[^}]*transition\s*:[^}]*transform\b/s);
+  assert.match(css, /\.chevron\.open\s*\{[^}]*transform\s*:\s*rotate\s*\(/s);
+});
