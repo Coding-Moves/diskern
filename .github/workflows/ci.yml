@@ -61,6 +61,9 @@ jobs:
   # against string literals on Linux and executed on Windows for the first
   # time in the release build — after the tag was pushed.
   #
+  # Note: `diskern-app` tests run in `app-tauri` below where Linux webview
+  # dependencies (webkitgtk) are already installed.
+  #
   # fail-fast off: when a change breaks two platforms, seeing one of them
   # is half a bug report.
   test:
@@ -75,7 +78,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - run: cargo test -p diskern-core -p diskern-cli --all-features
 
-  # Type-checks app/src-tauri against the current diskern-core. Until this
+  # Type-checks and tests app/src-tauri against the current diskern-core. Until this
   # existed nothing compiled the Tauri crate between releases: a breaking
   # change to a core signature merged green, then failed the release build
   # after the v* tag was already pushed.
@@ -83,6 +86,9 @@ jobs:
   # clippy, not a full `cargo build` — the goal is catching signature drift
   # and lint regressions in the shell; the release workflow still owns
   # producing an actual bundle.
+  #
+  # Runs tests with `cargo test -p diskern-app` after clippy. The Tauri system
+  # dependencies (webkitgtk on Linux) are already installed in this job.
   #
   # Every platform the shell is built for, because the shells differ:
   # Linux links webkitgtk and the GTK3 stack, Windows links WebView2,
@@ -133,6 +139,7 @@ jobs:
           components: clippy
       - uses: swatinem/rust-cache@v2
       - run: cargo clippy -p diskern-app --all-targets -- -D warnings
+      - run: cargo test -p diskern-app
 
   # Spell-check code, docs, and comments. Config in _typos.toml.
   # Failures annotate the exact line in the PR diff.

@@ -6,6 +6,8 @@
 
 use crate::{FileEntry, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -66,12 +68,13 @@ pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileE
     // Normalized once for the whole scan: the exclude list never changes, and
     // both the root check below and every directory the walk opens use it.
     let excludes: Vec<String> = opts.excludes.iter().map(|e| normalize_exclude(e)).collect();
+    let roots = planned_roots(&opts.roots)?;
+    let root_set: Arc<HashSet<PathBuf>> = Arc::new(roots.iter().cloned().collect());
 
-    for root in &opts.roots {
+    for root in roots {
         if progress.cancelled.load(Ordering::Relaxed) {
             return Err(crate::GenomeError::Cancelled);
         }
-        let root = absolute_root(root)?;
         // Say so, rather than walking a root whose every entry the exclude
         // list will drop. `/run/user/<uid>` holds real caches and sits under
         // the `/run` exclude, so this is reachable — and an empty report is
@@ -83,9 +86,23 @@ pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileE
                 exclude: exclude.to_string(),
             });
         }
-        walk_root(&root, &excludes, opts, &progress, &mut out)?;
+        walk_root(&root, &excludes, opts, &root_set, &progress, &mut out)?;
     }
     Ok(out)
+}
+
+fn planned_roots(roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut planned = Vec::new();
+    let mut seen = HashSet::new();
+
+    for root in roots {
+        let root = absolute_root(root)?;
+        if seen.insert(root.clone()) {
+            planned.push(root);
+        }
+    }
+
+    Ok(planned)
 }
 
 /// Which exclude, if any, contains `path`.
@@ -125,12 +142,15 @@ fn walk_root(
     root: &Path,
     excludes: &[String],
     opts: &ScanOptions,
+    roots: &Arc<HashSet<PathBuf>>,
     progress: &ScanProgress,
     out: &mut Vec<FileEntry>,
 ) -> Result<()> {
     // `process_read_dir` runs on every directory the walk opens, so the list
     // arrives already normalized rather than being rebuilt here.
     let excludes = excludes.to_vec();
+    let current_root = root.to_path_buf();
+    let roots = Arc::clone(roots);
 
     let walker = jwalk::WalkDir::new(root)
         .follow_links(opts.follow_symlinks)
@@ -139,7 +159,11 @@ fn walk_root(
             children.retain(|entry| {
                 entry
                     .as_ref()
-                    .map(|e| !is_excluded(&e.path(), &excludes))
+                    .map(|e| {
+                        let path = e.path();
+                        !is_excluded(&path, &excludes)
+                            && (path == current_root || !roots.contains(&path))
+                    })
                     .unwrap_or(true)
             });
         });
@@ -148,11 +172,27 @@ fn walk_root(
         if progress.cancelled.load(Ordering::Relaxed) {
             return Err(crate::GenomeError::Cancelled);
         }
-        let Ok(entry) = entry else { continue }; // permission errors: skip, don't die
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) if err.depth() == 0 => return Err(root_walk_error(root, err)),
+            Err(_) => continue, // descendant permission errors: skip, don't die
+        };
+        if let Some(err) = root_read_error(root, &entry) {
+            return Err(err);
+        }
         if !entry.file_type().is_file() {
             continue;
         }
-        let Ok(meta) = entry.metadata() else { continue };
+        let meta = match entry.metadata() {
+            Ok(meta) => meta,
+            Err(err) if entry.depth() == 0 => {
+                return Err(crate::GenomeError::Io {
+                    path: entry.path(),
+                    source: err.into(),
+                });
+            }
+            Err(_) => continue,
+        };
         let size = meta.len();
 
         progress.files_seen.fetch_add(1, Ordering::Relaxed);
@@ -168,6 +208,33 @@ fn walk_root(
         });
     }
     Ok(())
+}
+
+fn root_read_error(root: &Path, entry: &jwalk::DirEntry<((), ())>) -> Option<crate::GenomeError> {
+    if entry.depth() != 0 {
+        return None;
+    }
+
+    let error = entry.read_children.as_ref()?.error()?;
+    Some(crate::GenomeError::Io {
+        path: error.path().unwrap_or(root).to_path_buf(),
+        source: borrowed_walk_error(error),
+    })
+}
+
+fn root_walk_error(root: &Path, error: jwalk::Error) -> crate::GenomeError {
+    let path = error.path().unwrap_or(root).to_path_buf();
+    crate::GenomeError::Io {
+        path,
+        source: error.into(),
+    }
+}
+
+fn borrowed_walk_error(error: &jwalk::Error) -> io::Error {
+    let kind = error
+        .io_error()
+        .map_or(io::ErrorKind::Other, |err| err.kind());
+    io::Error::new(kind, error.to_string())
 }
 
 /// Lowercased, `/`-separated, no trailing separator. An exclude written
@@ -243,6 +310,7 @@ fn to_epoch(t: std::time::SystemTime) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn excludes_match_whole_components_not_characters() {
@@ -377,6 +445,162 @@ mod tests {
             "{err:?}"
         );
         assert!(err.to_string().contains("excluded directory"), "{err}");
+    }
+
+    #[test]
+    fn repeated_roots_are_scanned_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("one.bin"), b"one").unwrap();
+        let progress = Arc::new(ScanProgress::default());
+
+        let entries = scan(
+            &ScanOptions {
+                roots: vec![dir.path().to_path_buf(), dir.path().to_path_buf()],
+                ..Default::default()
+            },
+            Arc::clone(&progress),
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1, "{entries:#?}");
+        assert_eq!(progress.files_seen.load(Ordering::Relaxed), 1);
+        assert_eq!(progress.bytes_seen.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn nested_roots_do_not_count_the_child_tree_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(dir.path().join("root.bin"), b"root").unwrap();
+        std::fs::write(child.join("child.bin"), b"child").unwrap();
+
+        for roots in [
+            vec![dir.path().to_path_buf(), child.clone()],
+            vec![child.clone(), dir.path().to_path_buf()],
+        ] {
+            let progress = Arc::new(ScanProgress::default());
+            let entries = scan(
+                &ScanOptions {
+                    roots,
+                    ..Default::default()
+                },
+                Arc::clone(&progress),
+            )
+            .unwrap();
+
+            assert_eq!(entries.len(), 2, "{entries:#?}");
+            assert_eq!(progress.files_seen.load(Ordering::Relaxed), 2);
+            assert_eq!(progress.bytes_seen.load(Ordering::Relaxed), 9);
+        }
+    }
+
+    #[test]
+    fn an_explicit_child_root_still_reports_its_own_exclude_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(child.join("one.bin"), b"one").unwrap();
+
+        let err = scan(
+            &ScanOptions {
+                roots: vec![dir.path().to_path_buf(), child.clone()],
+                excludes: vec![child.to_string_lossy().into_owned()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap_err();
+
+        match err {
+            crate::GenomeError::ExcludedRoot { path, .. } => assert_eq!(path, child),
+            other => panic!("expected excluded child root, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_missing_root_is_an_error_from_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+
+        let err = scan(
+            &ScanOptions {
+                roots: vec![missing.clone()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap_err();
+
+        let text = err.to_string();
+        assert!(text.contains(&missing.display().to_string()), "{text}");
+    }
+
+    #[test]
+    fn an_invalid_child_root_is_an_error_from_the_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"not a directory").unwrap();
+        let invalid_root = file.join("child");
+
+        let err = scan(
+            &ScanOptions {
+                roots: vec![invalid_root.clone()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap_err();
+
+        let text = err.to_string();
+        assert!(text.contains(&invalid_root.display().to_string()), "{text}");
+    }
+
+    #[test]
+    fn an_empty_readable_root_still_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let entries = scan(
+            &ScanOptions {
+                roots: vec![dir.path().to_path_buf()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap();
+
+        assert!(entries.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_explicit_root_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        let original_mode = std::fs::metadata(&locked).unwrap().permissions().mode();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        if std::fs::read_dir(&locked).is_ok() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(original_mode))
+                .unwrap();
+            return;
+        }
+
+        let err = scan(
+            &ScanOptions {
+                roots: vec![locked.clone()],
+                ..Default::default()
+            },
+            Arc::new(ScanProgress::default()),
+        )
+        .unwrap_err();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(original_mode)).unwrap();
+
+        let text = err.to_string();
+        assert!(text.contains(&locked.display().to_string()), "{text}");
     }
 
     /// The check is about containment, not a shared prefix: `/runtime-data`

@@ -18,6 +18,10 @@ All notable changes to Diskern are documented here. The format follows
   EXE release asset
 - `diskern scan` now rejects missing and nonexistent roots instead of
   reporting a successful empty scan
+- Scans now report missing or unreadable roots from the shared engine, so the
+  desktop app and CLI both fail clearly instead of returning an empty report
+- Repeated and nested scan roots are only counted once, so selecting a parent
+  directory and one of its children no longer doubles file counts or bytes
 - The landing page now applies its theme to the document root, preventing
   light scrollbars, white overscroll areas, and a white flash before React loads
 - The system temp rule no longer reaches user and project `var/tmp` directories

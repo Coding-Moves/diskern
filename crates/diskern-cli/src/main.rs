@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use diskern_core::{human_bytes, report, rules::RulesDb, scanner, Category, Finding, Verdict};
 use std::path::PathBuf;
@@ -198,18 +198,6 @@ fn load_rules(path: Option<&std::path::Path>) -> Result<RulesDb> {
     Ok(rules.with_embedded_protected_rules())
 }
 
-fn validate_roots(roots: &[PathBuf]) -> Result<()> {
-    for root in roots {
-        if !root
-            .try_exists()
-            .with_context(|| format!("could not check scan root '{}'", root.display()))?
-        {
-            bail!("scan root does not exist: {}", root.display());
-        }
-    }
-    Ok(())
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -220,7 +208,6 @@ fn main() -> Result<()> {
             verdict,
             rules,
         } => {
-            validate_roots(&roots)?;
             let external_rules = rules.as_deref();
             let rules_db = load_rules(external_rules)?;
             let opts = scanner::ScanOptions {
@@ -299,9 +286,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{human_bytes, plural, validate_roots, Cli};
+    use super::{human_bytes, plural, Cli};
     use clap::{error::ErrorKind, Parser};
-    use std::path::PathBuf;
 
     #[test]
     fn scan_requires_at_least_one_root() {
@@ -311,32 +297,6 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
-    }
-
-    #[test]
-    fn nonexistent_scan_root_is_rejected_before_scanning() {
-        let missing = PathBuf::from("diskern-test-root-that-does-not-exist");
-        let error = validate_roots(std::slice::from_ref(&missing)).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            format!("scan root does not exist: {}", missing.display())
-        );
-    }
-
-    #[test]
-    fn unreadable_scan_root_error_names_the_root() {
-        let temp = tempfile::tempdir().unwrap();
-        let file = temp.path().join("file");
-        std::fs::write(&file, b"not a directory").unwrap();
-        let invalid_root = file.join("child");
-
-        let error = validate_roots(std::slice::from_ref(&invalid_root)).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            format!("could not check scan root '{}'", invalid_root.display())
-        );
     }
 
     #[test]
