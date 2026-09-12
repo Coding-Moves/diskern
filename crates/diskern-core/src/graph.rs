@@ -25,10 +25,31 @@ const PROJECTS: &[(&str, ProjectKind, &[&str])] = &[
     ("cargo.toml", ProjectKind::Cargo, &["target"]),
     ("package.json", ProjectKind::Npm, &["node_modules"]),
     ("pyproject.toml", ProjectKind::Python, &[".venv", "venv"]),
+    ("go.mod", ProjectKind::Go, &["vendor"]),
+    ("pom.xml", ProjectKind::Maven, &["target"]),
+    ("build.gradle", ProjectKind::Gradle, &["build", ".gradle"]),
+    (
+        "build.gradle.kts",
+        ProjectKind::Gradle,
+        &["build", ".gradle"],
+    ),
+    ("gemfile", ProjectKind::Ruby, &["vendor/bundle"]),
+    ("composer.json", ProjectKind::Php, &["vendor"]),
+    ("pubspec.yaml", ProjectKind::Dart, &[".dart_tool", "build"]),
 ];
 
-/// Directory names that are dependency stores wherever they appear.
-const STORE_NAMES: &[&str] = &["target", "node_modules", ".venv", "venv"];
+/// Directory names or relative paths that are dependency stores wherever they appear.
+const STORE_NAMES: &[&str] = &[
+    "target",
+    "node_modules",
+    ".venv",
+    "venv",
+    "vendor",
+    "vendor/bundle",
+    "build",
+    ".gradle",
+    ".dart_tool",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Node {
@@ -42,6 +63,12 @@ pub enum ProjectKind {
     Cargo,
     Npm,
     Python,
+    Go,
+    Maven,
+    Gradle,
+    Ruby,
+    Php,
+    Dart,
     Unknown,
 }
 
@@ -107,15 +134,13 @@ impl ImpactGraph {
             if cancelled.load(Ordering::Relaxed) {
                 return None;
             }
-            let store = enclosing_store(&entry.path);
-            if let Some(store) = &store {
-                stores.insert(store.clone());
-            }
+            let entry_stores = enclosing_stores(&entry.path);
+            stores.extend(entry_stores.iter().cloned());
 
             // A marker inside a dependency store marks nothing: every npm
             // package ships a package.json, and there are tens of
             // thousands of them under one node_modules.
-            if store.is_some() {
+            if !entry_stores.is_empty() {
                 continue;
             }
             let Some(kind) = marker_kind(&entry.path) else {
@@ -148,7 +173,9 @@ impl ImpactGraph {
                         kind: *kind,
                     });
                     let to = graph.node(Node::DependencyStore(store));
-                    graph.graph.add_edge(from, to, Edge::References);
+                    if graph.graph.find_edge(from, to).is_none() {
+                        graph.graph.add_edge(from, to, Edge::References);
+                    }
                 }
             }
         }
@@ -177,38 +204,50 @@ impl ImpactGraph {
     /// `proj/node_modules/react/index.js`, but three projects may well
     /// point at the `proj/node_modules` it sits in.
     pub fn referencing_projects(&self, path: &std::path::Path) -> usize {
+        let mut projects = HashSet::new();
         for ancestor in path.ancestors() {
             let Some(&ix) = self.index.get(ancestor) else {
                 continue;
             };
-            return self
-                .graph
-                .neighbors_directed(ix, petgraph::Direction::Incoming)
-                .filter(|&n| matches!(self.graph[n], Node::ProjectRoot { .. }))
-                .count();
+            projects.extend(
+                self.graph
+                    .neighbors_directed(ix, petgraph::Direction::Incoming)
+                    .filter_map(|n| match &self.graph[n] {
+                        Node::ProjectRoot { path, .. } => Some(path.clone()),
+                        _ => None,
+                    }),
+            );
         }
-        0
+        projects.len()
     }
 }
 
-/// The outermost dependency store this path sits inside, if any.
+/// Dependency stores this path sits inside, if any.
 ///
-/// Outermost, not nearest: `proj/node_modules/a/node_modules/b` belongs to
-/// `proj/node_modules`, which is the store a project actually references.
-fn enclosing_store(path: &Path) -> Option<PathBuf> {
-    let mut found = None;
+/// This returns every matching store ancestor. That keeps broad stores like
+/// PHP's `vendor` visible even when a package path also matches Ruby's more
+/// specific `vendor/bundle` store.
+fn enclosing_stores(path: &Path) -> Vec<PathBuf> {
+    let mut stores = Vec::new();
     let mut current = path.parent();
     while let Some(dir) = current {
-        if dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| STORE_NAMES.contains(&n))
-        {
-            found = Some(dir.to_path_buf());
+        if matching_store_len(dir).is_some() {
+            stores.push(dir.to_path_buf());
         }
         current = dir.parent();
     }
-    found
+    stores
+}
+
+fn matching_store_len(path: &Path) -> Option<usize> {
+    STORE_NAMES
+        .iter()
+        .filter_map(|store| {
+            let store_path = Path::new(store);
+            path.ends_with(store_path)
+                .then(|| store_path.components().count())
+        })
+        .max()
 }
 
 /// Which kind of project a file marks, if it marks one.
@@ -415,6 +454,100 @@ mod tests {
         ]));
         assert_eq!(
             graph.referencing_projects(Path::new("/repo/node_modules/react/index.js")),
+            1
+        );
+    }
+
+    #[test]
+    fn additional_project_markers_reference_their_stores() {
+        for (marker, stores) in [
+            ("go.mod", vec!["vendor/pkg/mod.go"]),
+            ("pom.xml", vec!["target/classes/app.class"]),
+            (
+                "build.gradle",
+                vec!["build/classes/App.class", ".gradle/caches/modules.lock"],
+            ),
+            (
+                "build.gradle.kts",
+                vec!["build/classes/App.class", ".gradle/caches/modules.lock"],
+            ),
+            ("Gemfile", vec!["vendor/bundle/ruby/3.3.0/gems/rack.rb"]),
+            (
+                "composer.json",
+                vec!["vendor/monolog/monolog/src/Logger.php"],
+            ),
+            (
+                "pubspec.yaml",
+                vec![".dart_tool/package_config.json", "build/app.dill"],
+            ),
+        ] {
+            for store_file in stores {
+                let marker_path = format!("/repo/app/{marker}");
+                let store_path = format!("/repo/app/{store_file}");
+                let graph = ImpactGraph::from_entries(&entries(&[
+                    marker_path.as_str(),
+                    store_path.as_str(),
+                ]));
+
+                assert_eq!(
+                    graph.referencing_projects(Path::new(&store_path)),
+                    1,
+                    "{marker} should reference {store_file}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shared_store_names_count_one_root_once() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Cargo.toml",
+            "/repo/pom.xml",
+            "/repo/target/debug/app",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/target/debug/app")),
+            1
+        );
+    }
+
+    #[test]
+    fn nested_store_names_stay_specific() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Gemfile",
+            "/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb")),
+            1
+        );
+    }
+
+    #[test]
+    fn broad_vendor_stores_still_cover_bundle_named_packages() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/composer.json",
+            "/repo/vendor/bundle/package/src/lib.php",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/package/src/lib.php")),
+            1
+        );
+    }
+
+    #[test]
+    fn parent_and_child_store_references_count_one_root_once() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Gemfile",
+            "/repo/composer.json",
+            "/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb")),
             1
         );
     }
