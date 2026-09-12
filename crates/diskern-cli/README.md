@@ -14,6 +14,9 @@ diskern scan ~/Downloads --verdict safe
 # Every finding, not just the first few per category
 diskern scan ~ --top 0
 
+# Skip large directories while scanning their parent
+diskern scan ~ --exclude ~/Videos --exclude ~/VMs
+
 # Full JSON report (for scripting / piping into jq)
 diskern scan ~/Downloads --json
 ```
@@ -51,6 +54,7 @@ nothing will offer to move it.
 | Flag        | Default | Effect                                                  |
 | ----------- | ------- | ------------------------------------------------------- |
 | `--top N`   | `5`     | Findings shown per category; `0` shows every one.       |
+| `--exclude <dir>` | platform defaults | Skip a directory while scanning; repeat the flag to skip more. User excludes are added to the built-in protected excludes. |
 | `--verdict` | all     | `safe`, `review`, `risky` or `protected`. Duplicate sets have no verdict, so they are omitted when this is set. |
 | `--json`    | off     | Full report as JSON; the flags above don't apply.        |
 | `--rules <file>` | embedded | Load and validate an external rules database; embedded protected rules remain authoritative. |
