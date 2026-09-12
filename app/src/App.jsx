@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
-import { appState } from "./updater.js";
+import { runAppOperation } from "./updateCoordinator.js";
 
 const CATEGORY_LABEL = {
   browser_cache: "Browser cache",
@@ -72,12 +72,14 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
     }
     setPhase("working");
     try {
-      await invoke("quarantine_finding", {
-        path: f.entry.path,
-        quarantineDir,
+      await runAppOperation(async () => {
+        await invoke("quarantine_finding", {
+          path: f.entry.path,
+          quarantineDir,
+        });
+        // Success: tell the parent to remove this row and update the total.
+        onQuarantined(f);
       });
-      // Success: tell the parent to remove this row and update the total.
-      onQuarantined(f);
     } catch (e) {
       // Backend refused (e.g. re-classification changed the verdict) or the
       // move failed. Show it right here, next to the row.
@@ -236,12 +238,14 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
     setError(null);
     setBusyPath(record.quarantined_to);
     try {
-      await invoke("restore_quarantined", {
-        quarantineDir,
-        quarantinedTo: record.quarantined_to,
+      await runAppOperation(async () => {
+        await invoke("restore_quarantined", {
+          quarantineDir,
+          quarantinedTo: record.quarantined_to,
+        });
+        onRestored(record);
+        await reload();
       });
-      onRestored(record);
-      await reload();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -253,13 +257,15 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
     setError(null);
     setPurgePhase("working");
     try {
-      const summary = await invoke("purge_quarantine", { quarantineDir });
-      setPurgeNotice(
-        `Deleted ${summary.files_removed} file${summary.files_removed === 1 ? "" : "s"}` +
-          ` · ${(summary.bytes_removed / 1e6).toFixed(1)} MB freed` +
-          (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
-      );
-      await reload();
+      await runAppOperation(async () => {
+        const summary = await invoke("purge_quarantine", { quarantineDir });
+        setPurgeNotice(
+          `Deleted ${summary.files_removed} file${summary.files_removed === 1 ? "" : "s"}` +
+            ` · ${(summary.bytes_removed / 1e6).toFixed(1)} MB freed` +
+            (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
+        );
+        await reload();
+      });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -465,44 +471,48 @@ export default function App() {
     }
     if (!folder) return;
 
-    // Starting a scan invalidates the previous backend report authority.
-    // Clear the view at the same time so no stale row remains actionable.
-    setReport(null);
-    setScannedFolder(null);
-    setQuarantinedPaths(new Set());
-    setReclaimed(0);
-    setLiveProgress({ files_seen: 0, bytes_seen: 0 });
-    setScanning(true);
-    setCancelling(false);
-    appState.busy = true;
-
-    // Subscribe to live progress events emitted by the Rust command
-    // roughly every 150ms while the scan runs.
-    unlistenRef.current = await listen("scan-progress", (event) => {
-      setLiveProgress(event.payload);
-    });
-
     try {
-      const result = await invoke("start_scan", { roots: [folder] });
-      // null means the scan was cancelled. The backend has no completed
-      // report authority after a cancellation, and the view was cleared when
-      // this scan began.
-      if (result === null) {
-        setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
-      } else {
-        setReport(result);
-        setScannedFolder(folder);
-      }
+      await runAppOperation(async () => {
+        // Starting a scan invalidates the previous backend report authority.
+        // Clear the view at the same time so no stale row remains actionable.
+        setReport(null);
+        setScannedFolder(null);
+        setQuarantinedPaths(new Set());
+        setReclaimed(0);
+        setLiveProgress({ files_seen: 0, bytes_seen: 0 });
+        setScanning(true);
+        setCancelling(false);
+
+        try {
+          // Subscribe to live progress events emitted by the Rust command
+          // roughly every 150ms while the scan runs.
+          unlistenRef.current = await listen("scan-progress", (event) => {
+            setLiveProgress(event.payload);
+          });
+
+          const result = await invoke("start_scan", { roots: [folder] });
+          // null means the scan was cancelled. The backend has no completed
+          // report authority after a cancellation, and the view was cleared when
+          // this scan began.
+          if (result === null) {
+            setNotice("Scan cancelled. Scanning is read-only — nothing was moved or deleted.");
+          } else {
+            setReport(result);
+            setScannedFolder(folder);
+          }
+        } catch (e) {
+          setError(String(e));
+        } finally {
+          setScanning(false);
+          setCancelling(false);
+          if (unlistenRef.current) {
+            unlistenRef.current();
+            unlistenRef.current = null;
+          }
+        }
+      });
     } catch (e) {
       setError(String(e));
-    } finally {
-      setScanning(false);
-      setCancelling(false);
-      appState.busy = false;
-      if (unlistenRef.current) {
-        unlistenRef.current();
-        unlistenRef.current = null;
-      }
     }
   }
 
