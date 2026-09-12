@@ -16,6 +16,18 @@ fn run_scan_roots<'a>(
     command.output().expect("diskern should start")
 }
 
+fn run_scan_with_excludes<'a>(
+    root: &std::path::Path,
+    excludes: impl IntoIterator<Item = &'a std::path::Path>,
+) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_diskern"));
+    command.arg("scan").arg(root);
+    for exclude in excludes {
+        command.arg("--exclude").arg(exclude);
+    }
+    command.output().expect("diskern should start")
+}
+
 #[test]
 fn missing_scan_root_fails_and_names_the_root() {
     let temp = tempdir().unwrap();
@@ -67,5 +79,27 @@ fn nested_scan_roots_are_counted_once_in_the_summary() {
     assert!(
         stdout.contains("Scanned 2 files."),
         "expected nested roots to count two files once, got: {stdout}"
+    );
+}
+
+#[test]
+fn scan_excludes_cli_directories() {
+    let temp = tempdir().unwrap();
+    let skipped = temp.path().join("skip-me");
+    std::fs::create_dir(&skipped).unwrap();
+    std::fs::write(temp.path().join("keep.bin"), b"keep").unwrap();
+    std::fs::write(skipped.join("skip.bin"), b"skip").unwrap();
+
+    let output = run_scan_with_excludes(temp.path(), [skipped.as_path()]);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Scanned 1 files."),
+        "expected excluded directory to be skipped, got: {stdout}"
     );
 }

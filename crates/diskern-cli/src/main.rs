@@ -21,6 +21,9 @@ enum Command {
         /// Directories to scan
         #[arg(required = true)]
         roots: Vec<PathBuf>,
+        /// Directories to skip while scanning; may be repeated
+        #[arg(long, value_name = "DIR")]
+        exclude: Vec<PathBuf>,
         /// Emit full JSON report instead of a summary
         #[arg(long)]
         json: bool,
@@ -198,11 +201,31 @@ fn load_rules(path: Option<&std::path::Path>) -> Result<RulesDb> {
     Ok(rules.with_embedded_protected_rules())
 }
 
+fn scan_options(roots: Vec<PathBuf>, excludes: Vec<PathBuf>) -> Result<scanner::ScanOptions> {
+    let mut opts = scanner::ScanOptions {
+        roots,
+        ..Default::default()
+    };
+
+    for exclude in excludes {
+        let absolute = std::path::absolute(&exclude).with_context(|| {
+            format!(
+                "could not normalize exclude path '{}'; check that the path is valid",
+                exclude.display()
+            )
+        })?;
+        opts.excludes.push(absolute.to_string_lossy().into_owned());
+    }
+
+    Ok(opts)
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Scan {
             roots,
+            exclude,
             json,
             top,
             verdict,
@@ -210,10 +233,7 @@ fn main() -> Result<()> {
         } => {
             let external_rules = rules.as_deref();
             let rules_db = load_rules(external_rules)?;
-            let opts = scanner::ScanOptions {
-                roots,
-                ..Default::default()
-            };
+            let opts = scan_options(roots, exclude)?;
             let progress = Arc::new(scanner::ScanProgress::default());
             let entries = scanner::scan(&opts, progress)?;
             let report = report::build(entries, &rules_db);
@@ -286,8 +306,9 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{human_bytes, plural, Cli};
+    use super::{human_bytes, plural, scan_options, Cli};
     use clap::{error::ErrorKind, Parser};
+    use std::path::PathBuf;
 
     #[test]
     fn scan_requires_at_least_one_root() {
@@ -297,6 +318,16 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn scan_options_append_cli_excludes_to_defaults() {
+        let before = diskern_core::scanner::ScanOptions::default().excludes.len();
+        let opts = scan_options(vec![PathBuf::from(".")], vec![PathBuf::from("target")]).unwrap();
+
+        assert_eq!(opts.roots, vec![PathBuf::from(".")]);
+        assert_eq!(opts.excludes.len(), before + 1);
+        assert!(opts.excludes.last().unwrap().ends_with("target"));
     }
 
     #[test]
