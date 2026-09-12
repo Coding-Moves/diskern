@@ -10,6 +10,9 @@ All notable changes to Diskern are documented here. The format follows
 
 - The CLI scan summary now says "1 file" instead of "1 files" when a
   scan sees exactly one file
+- Removed unused finding categories for duplicate files and empty folders,
+  since duplicates already have their own report section and empty folders are
+  not produced by the scanner
 
 ## [0.3.0] — 2026-09-12
 
