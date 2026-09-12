@@ -60,10 +60,24 @@ impl ScanProgress {
 }
 
 /// Walk the roots and return every file entry. Read-only.
-///
-/// TODO(next): stream entries through a channel instead of collecting,
-/// so the UI can render results while the scan runs.
 pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileEntry>> {
+    scan_with(opts, progress, |_| {})
+}
+
+/// [`scan`] plus a callback for each collected file entry.
+///
+/// The callback runs after the progress counters move and before the entry
+/// is stored in the final scan list. It is for provisional UI feedback only:
+/// the complete report still comes from the returned `Vec<FileEntry>` so the
+/// impact graph and duplicate detector can make the final safety decision.
+pub fn scan_with<F>(
+    opts: &ScanOptions,
+    progress: Arc<ScanProgress>,
+    mut on_entry: F,
+) -> Result<Vec<FileEntry>>
+where
+    F: FnMut(&FileEntry),
+{
     let mut out = Vec::new();
     // Normalized once for the whole scan: the exclude list never changes, and
     // both the root check below and every directory the walk opens use it.
@@ -86,7 +100,15 @@ pub fn scan(opts: &ScanOptions, progress: Arc<ScanProgress>) -> Result<Vec<FileE
                 exclude: exclude.to_string(),
             });
         }
-        walk_root(&root, &excludes, opts, &root_set, &progress, &mut out)?;
+        walk_root(
+            &root,
+            &excludes,
+            opts,
+            &root_set,
+            &progress,
+            &mut out,
+            &mut on_entry,
+        )?;
     }
     Ok(out)
 }
@@ -145,7 +167,11 @@ fn walk_root(
     roots: &Arc<HashSet<PathBuf>>,
     progress: &ScanProgress,
     out: &mut Vec<FileEntry>,
-) -> Result<()> {
+    on_entry: &mut F,
+) -> Result<()>
+where
+    F: FnMut(&FileEntry),
+{
     // `process_read_dir` runs on every directory the walk opens, so the list
     // arrives already normalized rather than being rebuilt here.
     let excludes = excludes.to_vec();
@@ -198,7 +224,7 @@ fn walk_root(
         progress.files_seen.fetch_add(1, Ordering::Relaxed);
         progress.bytes_seen.fetch_add(size, Ordering::Relaxed);
 
-        out.push(FileEntry {
+        let entry = FileEntry {
             path: entry.path(),
             size,
             modified: meta.modified().ok().and_then(to_epoch),
@@ -206,7 +232,9 @@ fn walk_root(
             is_symlink: entry.path_is_symlink(),
             identity: file_identity(&entry.path(), &meta),
             hash: None,
-        });
+        };
+        on_entry(&entry);
+        out.push(entry);
     }
     Ok(())
 }

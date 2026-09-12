@@ -185,6 +185,42 @@ where
     })
 }
 
+/// Build the provisional row the UI may show while the filesystem walk is
+/// still running.
+///
+/// This deliberately uses only information available during the walk: the
+/// matching rule and the file metadata. It does not consult the impact graph
+/// or duplicate detector, so callers must present this as a preview and must
+/// not make it actionable. The final report can make a verdict stricter or
+/// adjust reclaimable bytes once full-disk context exists.
+pub fn provisional_finding(
+    entry: &FileEntry,
+    rules: &RulesDb,
+    counted_identities: &mut HashSet<FileIdentity>,
+    now: i64,
+) -> Option<Finding> {
+    let (category, verdict, rule) = rules.classify(&entry.path);
+    if category == Category::Unknown {
+        return None;
+    }
+
+    let assessment = risk::assess(entry, verdict, now);
+    let mut reasons: Vec<String> = rule
+        .map(|r| vec![format!("matched rule {}: {}", r.id, r.description)])
+        .unwrap_or_default();
+    reasons.push("preview while scanning; final safety check still running".into());
+    reasons.extend(assessment.reasons);
+
+    Some(Finding {
+        reclaimable: finding_reclaimable(entry, verdict, counted_identities),
+        entry: entry.clone(),
+        category,
+        verdict,
+        risk_score: assessment.score,
+        reasons,
+    })
+}
+
 /// Whether anything will ever offer to move this file.
 ///
 /// `actions::quarantine` refuses Protected and Risky, and the UI renders
@@ -334,6 +370,46 @@ mod tests {
                 ReportStage::PreparingFindings,
             ]
         );
+    }
+
+    #[test]
+    fn provisional_findings_use_rule_evidence_without_final_graph_context() {
+        let mut counted = HashSet::new();
+        let entry = FileEntry {
+            path: std::path::PathBuf::from("/tmp/dk-scratch/cache.bin"),
+            size: 4,
+            modified: None,
+            accessed: None,
+            is_symlink: false,
+            identity: None,
+            hash: None,
+        };
+
+        let finding = provisional_finding(&entry, &temp_rules(), &mut counted, 0).unwrap();
+
+        assert_eq!(finding.category, Category::TempFile);
+        assert_eq!(finding.verdict, Verdict::Review);
+        assert_eq!(finding.reclaimable, 4);
+        assert!(finding
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("preview while scanning")));
+    }
+
+    #[test]
+    fn provisional_findings_skip_unknown_files() {
+        let mut counted = HashSet::new();
+        let entry = FileEntry {
+            path: std::path::PathBuf::from("/home/me/photo.jpg"),
+            size: 4,
+            modified: None,
+            accessed: None,
+            is_symlink: false,
+            identity: None,
+            hash: None,
+        };
+
+        assert!(provisional_finding(&entry, &temp_rules(), &mut counted, 0).is_none());
     }
 
     /// Issue #47. `min_file_size` was applied inside the walk, so a file
