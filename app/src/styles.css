@@ -289,6 +289,76 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .purge .confirm { flex-wrap: wrap; }
 .purge .confirm-q { color: #c0392b; opacity: 1; }
 
+/* Update status toast: a small card pinned to the bottom corner, not a
+   modal — checking and downloading must never block the app, and the
+   confirm dialog should never arrive without warning. position:fixed
+   keeps it out of layout entirely; the only motion is transform/opacity. */
+.update-status {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  max-width: 19rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
+  background: Canvas;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  animation: update-in 160ms ease-out;
+}
+/* Same short drop-in entrance as the scan panel — appears, doesn't sweep. */
+@keyframes update-in {
+  from { opacity: 0; transform: translateY(0.4rem); }
+  to { opacity: 1; transform: none; }
+}
+/* The dot is the "something is happening" cue: a calm blue pulse while
+   work is in flight, a steady grey while the update waits for the current
+   operation, and red only when the update itself failed. */
+.update-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  flex: none;
+  margin-top: 0.4rem;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.55);
+}
+.update-checking .update-dot,
+.update-downloading .update-dot,
+.update-ready .update-dot,
+.update-installing .update-dot {
+  background: #3498db;
+}
+.update-checking .update-dot,
+.update-downloading .update-dot,
+.update-installing .update-dot {
+  animation: update-pulse 1.8s ease-in-out infinite;
+}
+/* Like the shield's breath, not a spinner — and transform/opacity only,
+   so the pulse can never nudge the toast's layout. */
+@keyframes update-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+.update-failed .update-dot { background: #c0392b; }
+.update-copy { min-width: 0; }
+.update-title { margin: 0; font-size: 0.84rem; font-weight: 600; }
+.update-detail { margin: 0.15rem 0 0; font-size: 0.78rem; opacity: 0.75; }
+/* Only a failed update needs dismissing; every other phase clears itself. */
+.update-dismiss {
+  flex: none;
+  align-self: center;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 5px;
+  opacity: 0.8;
+}
+.update-dismiss:hover { opacity: 1; }
+
 /* Reduced motion: when the OS asks for less animation, every transition
    and animation collapses to a near-instant single pass — state changes
    still read clearly, but nothing sweeps, pulses or loops. The scan bar
@@ -309,5 +379,10 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
   .progress-fill-indeterminate {
     animation: none;
     left: 30%;
+  }
+
+  /* The dot settles into a static colour instead of freezing mid-pulse. */
+  .update-dot {
+    animation: none;
   }
 }
