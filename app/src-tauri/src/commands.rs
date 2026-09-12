@@ -327,6 +327,7 @@ pub async fn start_scan(
         let mut counted_identities: HashSet<FileIdentity> = HashSet::new();
         let mut preview_findings = Vec::new();
         let mut preview_total_reclaimable = 0;
+        let mut next_preview_emit = 25;
         match scanner::scan_with(&opts, progress_for_scan.clone(), |entry| {
             if let Some(finding) =
                 report::provisional_finding(entry, &rules, &mut counted_identities, now)
@@ -337,7 +338,7 @@ pub async fn start_scan(
                 // A scan can find many files per second. Emit in modest
                 // batches so the frontend gets early rows without making
                 // every single filesystem entry a cross-thread UI event.
-                if preview_findings.len().is_multiple_of(25) {
+                if preview_findings.len() == next_preview_emit {
                     let _ = window_for_preview.emit(
                         "scan-preview",
                         ScanPreviewPayload {
@@ -346,6 +347,7 @@ pub async fn start_scan(
                             total_reclaimable: preview_total_reclaimable,
                         },
                     );
+                    next_preview_emit += 25;
                 }
             }
         }) {

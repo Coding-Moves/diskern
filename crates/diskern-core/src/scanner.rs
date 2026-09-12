@@ -160,7 +160,7 @@ fn absolute_root(root: &Path) -> Result<PathBuf> {
     })
 }
 
-fn walk_root(
+fn walk_root<F>(
     root: &Path,
     excludes: &[String],
     opts: &ScanOptions,
