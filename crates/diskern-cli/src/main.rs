@@ -131,23 +131,36 @@ fn print_findings(findings: &[&Finding], top: usize) {
             continue;
         }
 
+        // Issue #100. A risky finding's `reclaimable` is deliberately
+        // zero — nothing will offer to move it — but as a row's size
+        // column that printed `0 B` next to files that are anything but,
+        // hiding the number the reader wants: how big the thing they're
+        // being warned about is. Rows in this section show the file's
+        // real size, while the totals keep reporting reclaimable bytes —
+        // and say so, so a large risky file can't be mistaken for space
+        // on offer.
+        let risky = verdict == Verdict::Risky;
+        let total_label = if risky { " reclaimable" } else { "" };
+
         let total: u64 = group.iter().map(|f| f.reclaimable).sum();
         println!();
         println!(
-            "{} — {} finding{} · {}",
+            "{} — {} finding{} · {}{}",
             verdict_label(verdict),
             group.len(),
             plural(group.len()),
-            human_bytes(total)
+            human_bytes(total),
+            total_label
         );
 
         for (category, items) in by_category(&group) {
             let subtotal: u64 = items.iter().map(|f| f.reclaimable).sum();
             println!(
-                "  {} · {} · {}",
+                "  {} · {} · {}{}",
                 category_label(category),
                 items.len(),
-                human_bytes(subtotal)
+                human_bytes(subtotal),
+                total_label
             );
 
             let shown = if top == 0 {
@@ -156,11 +169,8 @@ fn print_findings(findings: &[&Finding], top: usize) {
                 top.min(items.len())
             };
             for f in &items[..shown] {
-                println!(
-                    "    {:>9}  {}",
-                    human_bytes(f.reclaimable),
-                    f.entry.path.display()
-                );
+                let size = if risky { f.entry.size } else { f.reclaimable };
+                println!("    {:>9}  {}", human_bytes(size), f.entry.path.display());
                 // Every reason, not just the matched rule. The rule says
                 // what the file is; the rest say why this copy of it got
                 // the verdict it did — "referenced by 3 projects" is the

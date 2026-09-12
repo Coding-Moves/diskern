@@ -21,6 +21,9 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- The CLI scan report now shows a risky finding's real size on its row
+  instead of "0 B"; the risky section's totals are labelled "reclaimable"
+  so the zero still reads as nothing on offer, never as the file's size
 - The impact graph now recognises Go, Maven, Gradle, Ruby, PHP, and Dart
   project stores, so live build output is not treated like abandoned data
 - The desktop duplicate panel now hides quarantined paths and recalculates
