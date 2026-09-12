@@ -134,15 +134,13 @@ impl ImpactGraph {
             if cancelled.load(Ordering::Relaxed) {
                 return None;
             }
-            let store = enclosing_store(&entry.path);
-            if let Some(store) = &store {
-                stores.insert(store.clone());
-            }
+            let entry_stores = enclosing_stores(&entry.path);
+            stores.extend(entry_stores.iter().cloned());
 
             // A marker inside a dependency store marks nothing: every npm
             // package ships a package.json, and there are tens of
             // thousands of them under one node_modules.
-            if store.is_some() {
+            if !entry_stores.is_empty() {
                 continue;
             }
             let Some(kind) = marker_kind(&entry.path) else {
@@ -206,40 +204,39 @@ impl ImpactGraph {
     /// `proj/node_modules/react/index.js`, but three projects may well
     /// point at the `proj/node_modules` it sits in.
     pub fn referencing_projects(&self, path: &std::path::Path) -> usize {
+        let mut projects = HashSet::new();
         for ancestor in path.ancestors() {
             let Some(&ix) = self.index.get(ancestor) else {
                 continue;
             };
-            return self
-                .graph
-                .neighbors_directed(ix, petgraph::Direction::Incoming)
-                .filter(|&n| matches!(self.graph[n], Node::ProjectRoot { .. }))
-                .count();
+            projects.extend(
+                self.graph
+                    .neighbors_directed(ix, petgraph::Direction::Incoming)
+                    .filter_map(|n| match &self.graph[n] {
+                        Node::ProjectRoot { path, .. } => Some(path.clone()),
+                        _ => None,
+                    }),
+            );
         }
-        0
+        projects.len()
     }
 }
 
-/// The outermost dependency store this path sits inside, if any.
+/// Dependency stores this path sits inside, if any.
 ///
-/// Outermost, not nearest: `proj/node_modules/a/node_modules/b` belongs to
-/// `proj/node_modules`, which is the store a project actually references.
-fn enclosing_store(path: &Path) -> Option<PathBuf> {
-    let mut found: Option<(PathBuf, usize)> = None;
+/// This returns every matching store ancestor. That keeps broad stores like
+/// PHP's `vendor` visible even when a package path also matches Ruby's more
+/// specific `vendor/bundle` store.
+fn enclosing_stores(path: &Path) -> Vec<PathBuf> {
+    let mut stores = Vec::new();
     let mut current = path.parent();
     while let Some(dir) = current {
-        if let Some(store_len) = matching_store_len(dir) {
-            match &found {
-                // Prefer the outermost store for repeated single-name stores
-                // like nested node_modules, but keep a more specific nested
-                // store such as vendor/bundle instead of widening it to vendor.
-                Some((_, found_len)) if *found_len > store_len => {}
-                _ => found = Some((dir.to_path_buf(), store_len)),
-            }
+        if matching_store_len(dir).is_some() {
+            stores.push(dir.to_path_buf());
         }
         current = dir.parent();
     }
-    found.map(|(path, _)| path)
+    stores
 }
 
 fn matching_store_len(path: &Path) -> Option<usize> {
@@ -519,6 +516,33 @@ mod tests {
     fn nested_store_names_stay_specific() {
         let graph = ImpactGraph::from_entries(&entries(&[
             "/repo/Gemfile",
+            "/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb")),
+            1
+        );
+    }
+
+    #[test]
+    fn broad_vendor_stores_still_cover_bundle_named_packages() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/composer.json",
+            "/repo/vendor/bundle/package/src/lib.php",
+        ]));
+
+        assert_eq!(
+            graph.referencing_projects(Path::new("/repo/vendor/bundle/package/src/lib.php")),
+            1
+        );
+    }
+
+    #[test]
+    fn parent_and_child_store_references_count_one_root_once() {
+        let graph = ImpactGraph::from_entries(&entries(&[
+            "/repo/Gemfile",
+            "/repo/composer.json",
             "/repo/vendor/bundle/ruby/3.3.0/gems/rack.rb",
         ]));
 
