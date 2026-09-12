@@ -12,7 +12,7 @@ name = "diskern"
 path = "src/main.rs"
 
 [dependencies]
-diskern-core = { path = "../diskern-core" }
+diskern-core = { path = "../diskern-core", features = ["ai"] }
 anyhow.workspace = true
 serde_json.workspace = true
 clap = { version = "4", features = ["derive"] }
