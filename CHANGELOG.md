@@ -9,6 +9,10 @@ All notable changes to Diskern are documented here. The format follows
 ### Added
 
 - npm download caches are now classified as safe package-manager cache files
+- The desktop app now honours the `prefers-reduced-motion` OS/browser
+  setting, so the scan progress bar and any future animations or
+  transitions settle instead of sweeping or looping when reduced motion
+  is requested
 
 ### Fixed
 
