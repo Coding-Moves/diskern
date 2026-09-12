@@ -12,7 +12,7 @@ const ASSET_TYPES = [
     id: 'windows',
     os: 'windows',
     label: 'Download for Windows',
-    sublabel: '.msi installer',
+    sublabel: (name) => (name.endsWith('.msi') ? '.msi installer' : '.exe installer'),
     match: (name) => name.endsWith('.msi') || name.endsWith('.exe'),
   },
   {
@@ -49,7 +49,10 @@ export function matchDownloads(assets = []) {
       id: type.id,
       os: type.os,
       label: type.label,
-      sublabel: type.sublabel,
+      sublabel:
+        typeof type.sublabel === 'function'
+          ? type.sublabel(asset.name.toLowerCase())
+          : type.sublabel,
       url: asset.browser_download_url,
       size: asset.size,
     }
