@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { runAppOperation } from "./updateCoordinator.js";
+import { humanBytes } from "./format.js";
 
 const CATEGORY_LABEL = {
   browser_cache: "Browser cache",
@@ -20,10 +21,6 @@ const CATEGORY_LABEL = {
 // Protected are intentionally absent — the button never renders for them,
 // and the Rust command re-checks server-side anyway (defense in depth).
 const ACTIONABLE_VERDICTS = new Set(["safe", "review"]);
-
-function bytesToGB(n) {
-  return (n / 1e9).toFixed(2);
-}
 
 function groupFindings(findings) {
   const groups = { safe: [], review: [], risky: [], protected: [] };
@@ -91,7 +88,7 @@ function FindingRow({ f, quarantineDir, onQuarantined }) {
   return (
     <li className={`finding verdict-${f.verdict}`}>
       <span className="path">{f.entry.path}</span>
-      <span className="size">{(f.entry.size / 1e6).toFixed(1)} MB</span>
+      <span className="size">{humanBytes(f.entry.size)}</span>
       {/* Every reason, not just the matched rule: "referenced by 3
           projects" is what explains a risky row, and it is never the
           first one. */}
@@ -141,7 +138,7 @@ function CategorySection({ title, items, defaultOpen, quarantineDir, onQuarantin
         <span className="chevron">{isOpen ? "▾" : "▸"}</span>
         {title}
         <span className="group-meta">
-          {items.length} item{items.length === 1 ? "" : "s"} · {bytesToGB(total)} GB
+          {items.length} item{items.length === 1 ? "" : "s"} · {humanBytes(total)}
         </span>
       </button>
       {isOpen && (
@@ -178,7 +175,7 @@ function DuplicatesSection({ sets }) {
         <span className="chevron">{isOpen ? "▾" : "▸"}</span>
         Duplicate files
         <span className="group-meta">
-          {sets.length} set{sets.length === 1 ? "" : "s"} · {bytesToGB(total)} GB wasted
+          {sets.length} set{sets.length === 1 ? "" : "s"} · {humanBytes(total)} wasted
         </span>
       </button>
       {isOpen && (
@@ -186,8 +183,8 @@ function DuplicatesSection({ sets }) {
           {sets.map((set, i) => (
             <div key={i} className="dup-set">
               <div className="dup-set-header">
-                {set.paths.length} copies · {(set.size / 1e6).toFixed(1)} MB each ·{" "}
-                {(set.wasted / 1e6).toFixed(1)} MB wasted
+                {set.paths.length} copies · {humanBytes(set.size)} each ·{" "}
+                {humanBytes(set.wasted)} wasted
               </div>
               <ul className="dup-paths">
                 {set.paths.map((p, j) => (
@@ -261,7 +258,7 @@ function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
         const summary = await invoke("purge_quarantine", { quarantineDir });
         setPurgeNotice(
           `Deleted ${summary.files_removed} file${summary.files_removed === 1 ? "" : "s"}` +
-            ` · ${(summary.bytes_removed / 1e6).toFixed(1)} MB freed` +
+            ` · ${humanBytes(summary.bytes_removed)} freed` +
             (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
         );
         await reload();
@@ -362,7 +359,7 @@ function ScanningIndicator({ filesSeen, bytesSeen, onCancel, cancelling }) {
       </div>
       <p className="progress-count">
         {filesSeen.toLocaleString()} files found
-        {bytesSeen > 0 && <> · {(bytesSeen / 1e9).toFixed(2)} GB so far</>}
+        {bytesSeen > 0 && <> · {humanBytes(bytesSeen)} so far</>}
       </p>
       {/* The walk checks the cancel flag per entry, so stopping is quick but
           not instant — say "Stopping…" rather than pretending it's done. */}
@@ -555,7 +552,7 @@ export default function App() {
             {scannedFolder && <span className="scanned-folder">{scannedFolder}</span>}
             <br />
             {report.files_scanned.toLocaleString()} files scanned ·{" "}
-            {bytesToGB(report.total_reclaimable - reclaimed)} GB reclaimable
+            {humanBytes(report.total_reclaimable - reclaimed)} reclaimable
           </p>
 
           <button onClick={runScan} disabled={scanning}>
