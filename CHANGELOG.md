@@ -13,6 +13,11 @@ All notable changes to Diskern are documented here. The format follows
   setting, so the scan progress bar and any future animations or
   transitions settle instead of sweeping or looping when reduced motion
   is requested
+- Result sections and file actions in the desktop app now transition
+  smoothly: sections animate open and closed instead of appearing
+  instantly, quarantine/restore/purge controls fade between their idle,
+  confirm and working states, and working labels show a small spinner —
+  all covered by the reduced-motion setting above
 
 ### Fixed
 
