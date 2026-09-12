@@ -1,5 +1,9 @@
-use diskern_core::{actions, report, report::ReportStage, rules::RulesDb, scanner, GenomeError};
+use diskern_core::{
+    actions, report, report::ReportStage, rules::RulesDb, scanner, FileIdentity, Finding,
+    GenomeError,
+};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -197,6 +201,13 @@ struct ScanProgressPayload {
     phase: &'static str,
 }
 
+#[derive(Clone, Serialize)]
+struct ScanPreviewPayload {
+    findings: Vec<Finding>,
+    files_scanned: u64,
+    total_reclaimable: u64,
+}
+
 /// Everything a running scan owns outside itself: the ticker thread that
 /// emits `scan-progress`, and this scan's entry in the shared
 /// authority slot. Both are released on drop.
@@ -302,22 +313,62 @@ pub async fn start_scan(
 
     let progress_for_scan = progress.clone();
     let phase_for_scan = phase.clone();
+    let window_for_preview = window.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
         let opts = scanner::ScanOptions {
             roots,
             ..Default::default()
         };
-        match scanner::scan(&opts, progress_for_scan.clone()) {
+        let rules = RulesDb::embedded();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let mut counted_identities: HashSet<FileIdentity> = HashSet::new();
+        let mut preview_findings = Vec::new();
+        let mut preview_total_reclaimable = 0;
+        match scanner::scan_with(&opts, progress_for_scan.clone(), |entry| {
+            if let Some(finding) =
+                report::provisional_finding(entry, &rules, &mut counted_identities, now)
+            {
+                preview_total_reclaimable += finding.reclaimable;
+                preview_findings.push(finding);
+
+                // A scan can find many files per second. Emit in modest
+                // batches so the frontend gets early rows without making
+                // every single filesystem entry a cross-thread UI event.
+                if preview_findings.len() % 25 == 0 {
+                    let _ = window_for_preview.emit(
+                        "scan-preview",
+                        ScanPreviewPayload {
+                            findings: preview_findings.clone(),
+                            files_scanned: progress_for_scan.files_seen.load(Ordering::Relaxed),
+                            total_reclaimable: preview_total_reclaimable,
+                        },
+                    );
+                }
+            }
+        }) {
             // build_cancellable also returns None when cancelled — the walk
             // is only the first half, and dedup hashing is where a cancel
             // most needs to land.
-            Ok(entries) => Ok(report::build_with_progress(
-                entries,
-                &RulesDb::embedded(),
-                &report::ReportOptions::default(),
-                &progress_for_scan.cancelled,
-                |stage| set_scan_phase(&phase_for_scan, phase_for_report_stage(stage)),
-            )),
+            Ok(entries) => {
+                let _ = window_for_preview.emit(
+                    "scan-preview",
+                    ScanPreviewPayload {
+                        findings: preview_findings,
+                        files_scanned: progress_for_scan.files_seen.load(Ordering::Relaxed),
+                        total_reclaimable: preview_total_reclaimable,
+                    },
+                );
+                Ok(report::build_with_progress(
+                    entries,
+                    &rules,
+                    &report::ReportOptions::default(),
+                    &progress_for_scan.cancelled,
+                    |stage| set_scan_phase(&phase_for_scan, phase_for_report_stage(stage)),
+                ))
+            }
             // The user asked for this. `None` means "cancelled", which the
             // frontend renders as an outcome rather than a red error box.
             Err(GenomeError::Cancelled) => Ok(None),
