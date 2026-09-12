@@ -4,7 +4,7 @@
 //! Hashing is NOT done here — see [`crate::dedup`], which hashes only files
 //! whose sizes collide. On a typical disk that skips >95% of hash work.
 
-use crate::{FileEntry, Result};
+use crate::{FileEntry, FileIdentity, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io;
@@ -204,10 +204,51 @@ fn walk_root(
             modified: meta.modified().ok().and_then(to_epoch),
             accessed: meta.accessed().ok().and_then(to_epoch),
             is_symlink: entry.path_is_symlink(),
+            identity: file_identity(&entry.path(), &meta),
             hash: None,
         });
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn file_identity(_path: &Path, meta: &std::fs::Metadata) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    (meta.nlink() > 1).then_some(FileIdentity {
+        device: meta.dev(),
+        file: meta.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn file_identity(path: &Path, _meta: &std::fs::Metadata) -> Option<FileIdentity> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) };
+    if ok == 0 {
+        return None;
+    }
+
+    let info = unsafe { info.assume_init() };
+    if info.nNumberOfLinks <= 1 {
+        return None;
+    }
+
+    Some(FileIdentity {
+        device: info.dwVolumeSerialNumber.into(),
+        file: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_identity(_path: &Path, _meta: &std::fs::Metadata) -> Option<FileIdentity> {
+    None
 }
 
 fn root_read_error(root: &Path, entry: &jwalk::DirEntry<((), ())>) -> Option<crate::GenomeError> {
