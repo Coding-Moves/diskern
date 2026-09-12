@@ -431,6 +431,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn npm_cache_is_safe_to_remove() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/home/u/.npm/_cacache/content-v2/sha512/aa/package",
+            "/Users/u/.npm/_cacache/index-v5/ab/cd",
+            "C:\\Users\\u\\AppData\\Local\\npm-cache\\_cacache\\content-v2\\sha512\\aa\\package",
+        ] {
+            let (cat, verdict, rule) = db.classify(std::path::Path::new(path));
+            assert_eq!(
+                cat,
+                Category::PackageManagerCache,
+                "{path} matched {rule:?}"
+            );
+            assert_eq!(verdict, Verdict::Safe, "{path} matched {rule:?}");
+        }
+    }
+
+    #[test]
+    fn npm_state_outside_the_download_cache_is_not_marked_safe() {
+        let db = RulesDb::embedded();
+        for path in [
+            "/home/u/.npmrc",
+            "/home/u/.npm/_logs/2026-09-12-debug.log",
+            "C:\\Users\\u\\AppData\\Roaming\\npm\\npmrc",
+        ] {
+            let (cat, verdict, rule) = db.classify(std::path::Path::new(path));
+            assert_eq!(cat, Category::Unknown, "{path} matched {rule:?}");
+            assert_ne!(verdict, Verdict::Safe, "{path} matched {rule:?}");
+        }
+    }
+
     /// An installed application's own repair binary is not a reclaimable
     /// download. `unknown` is the right answer: report::build drops those,
     /// so it never reaches the user as an actionable row.
