@@ -1,10 +1,22 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+  useSyncExternalStore,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { visibleDuplicateSets } from "./duplicates.js";
-import { runAppOperation } from "./updateCoordinator.js";
+import {
+  runAppOperation,
+  getUpdateStatus,
+  subscribeUpdateStatus,
+  setUpdateStatus,
+} from "./updateCoordinator.js";
 import { humanBytes } from "./format.js";
 
 const CATEGORY_LABEL = {
@@ -409,6 +421,67 @@ function ScanningIndicator({ filesSeen, bytesSeen, phase, onCancel, cancelling }
   );
 }
 
+/**
+ * Copy for each phase the update checker publishes. The title says what is
+ * happening; the detail — when there is one — says which version it is
+ * happening to, or what comes next. Tone follows the scan panel: calm and
+ * plain, never alarming.
+ */
+const UPDATE_PHASES = {
+  checking: { title: "Checking for updates…" },
+  downloading: {
+    title: "Downloading update…",
+    detail: (s) => s.version && `Diskern ${s.version}`,
+  },
+  deferred: {
+    title: "Will update after the current operation finishes",
+    detail: (s) => s.version && `Diskern ${s.version} is downloaded`,
+  },
+  ready: {
+    title: "Update ready to install",
+    detail: (s) => s.version && `Diskern ${s.version}`,
+  },
+  installing: {
+    title: "Installing update…",
+    detail: "Diskern will restart when it finishes",
+  },
+  failed: { title: "Update failed — you can keep using Diskern" },
+};
+
+/**
+ * A small corner toast for the auto-updater. Checking, downloading, waiting
+ * on running work, installing and failing each get a quiet line, so the
+ * "Restart to update?" dialog never appears out of nowhere and a deferred
+ * or failed update never reads as a frozen app.
+ *
+ * It is status-only, in a fixed corner, so nothing it shows can block or
+ * shift the app — the install decision itself still belongs to the confirm
+ * dialog. Only a failed update lingers, and it gets a dismiss button;
+ * every other phase clears itself when the checker moves on.
+ */
+function UpdateStatus({ status, onDismiss }) {
+  if (!status) return null;
+  const phase = UPDATE_PHASES[status.phase] ?? { title: String(status.phase) };
+  const detail =
+    typeof phase.detail === "function" ? phase.detail(status) : phase.detail;
+
+  return (
+    <div className={`update-status update-${status.phase}`} role="status">
+      {/* Decorative — the text already says what's happening. */}
+      <span className="update-dot" aria-hidden="true" />
+      <div className="update-copy">
+        <p className="update-title">{phase.title}</p>
+        {detail && <p className="update-detail">{detail}</p>}
+      </div>
+      {status.phase === "failed" && (
+        <button className="update-dismiss" onClick={onDismiss}>
+          Dismiss
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [report, setReport] = useState(null);
   const [previewReport, setPreviewReport] = useState(null);
@@ -433,6 +506,12 @@ export default function App() {
   // Bumped whenever this session moves a file in, so the quarantine list
   // re-reads the manifest rather than guessing at what changed.
   const [quarantineVersion, setQuarantineVersion] = useState(0);
+  // The updater runs outside React — its phases live in the coordinator's
+  // little store, so subscribing here (not props) is what keeps it simple.
+  const updateStatus = useSyncExternalStore(
+    subscribeUpdateStatus,
+    getUpdateStatus
+  );
   const progressUnlistenRef = useRef(null);
   const previewUnlistenRef = useRef(null);
 
@@ -694,6 +773,13 @@ export default function App() {
           />
         </section>
       )}
+
+      {/* Fixed corner toast — renders over either view and never takes
+          part in the layout either one is managing. */}
+      <UpdateStatus
+        status={updateStatus}
+        onDismiss={() => setUpdateStatus(null)}
+      />
     </main>
   );
 }
