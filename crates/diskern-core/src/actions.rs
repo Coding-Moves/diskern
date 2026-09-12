@@ -23,11 +23,20 @@ use std::sync::{Mutex, MutexGuard};
 /// Quarantine's record of itself, inside the quarantine directory.
 pub const MANIFEST_NAME: &str = "manifest.jsonl";
 
-/// Longest flattened name we will build. Filenames are capped at 255
-/// bytes on every filesystem Diskern targets, and a deep path flattens
-/// past that easily; the tail is kept because that is the half that
-/// distinguishes two files.
-const MAX_FLAT_LEN: usize = 180;
+/// Longest filename we will build, in bytes. Every filesystem Diskern
+/// targets accepts at least 255-byte names, and flattened source paths can
+/// exceed that easily.
+const MAX_FILENAME_BYTES: usize = 255;
+
+/// Legacy Windows APIs reject paths longer than 260 UTF-16 code units unless
+/// the caller uses an extended-length path prefix. Rust's filesystem APIs do
+/// not add that prefix here, so quarantine names must leave room for the
+/// quarantine directory too.
+#[cfg(windows)]
+const WINDOWS_MAX_PATH_CHARS: usize = 260;
+
+/// Room kept for collision suffixes such as `.4294967295`.
+const COLLISION_SUFFIX_RESERVE: usize = 11;
 
 /// Serializes every manifest access in this process.
 ///
@@ -209,18 +218,24 @@ fn to_epoch(t: std::time::SystemTime) -> Option<i64> {
 /// second `rename` would silently overwrite the first — quarantine losing
 /// a file is the one failure this module cannot have.
 fn unique_dest(quarantine_dir: &Path, stamp: i64, file: &Path) -> PathBuf {
-    let mut flat = file.to_string_lossy().replace(['/', '\\', ':'], "_");
-    if flat.len() > MAX_FLAT_LEN {
-        // Byte-slice on a char boundary; a split mid-codepoint would panic.
-        let cut = flat
-            .char_indices()
-            .map(|(i, _)| i)
-            .find(|&i| flat.len() - i <= MAX_FLAT_LEN)
-            .unwrap_or(0);
-        flat = flat.split_off(cut);
-    }
+    unique_dest_with_path_limit(quarantine_dir, stamp, file, windows_path_limit())
+}
 
-    let base = format!("{stamp}_{flat}");
+fn unique_dest_with_path_limit(
+    quarantine_dir: &Path,
+    stamp: i64,
+    file: &Path,
+    path_limit_chars: Option<usize>,
+) -> PathBuf {
+    let prefix = format!("{stamp}_");
+    let (flat_bytes, flat_chars) = flat_name_budget(quarantine_dir, &prefix, path_limit_chars);
+    let flat = truncate_tail(
+        file.to_string_lossy().replace(['/', '\\', ':'], "_"),
+        flat_bytes,
+        flat_chars,
+    );
+
+    let base = format!("{prefix}{flat}");
     let mut candidate = quarantine_dir.join(&base);
     let mut n = 1u32;
     while candidate.exists() {
@@ -228,6 +243,67 @@ fn unique_dest(quarantine_dir: &Path, stamp: i64, file: &Path) -> PathBuf {
         n += 1;
     }
     candidate
+}
+
+fn flat_name_budget(
+    quarantine_dir: &Path,
+    prefix: &str,
+    path_limit_chars: Option<usize>,
+) -> (usize, usize) {
+    let filename_bytes = MAX_FILENAME_BYTES
+        .saturating_sub(prefix.len() + COLLISION_SUFFIX_RESERVE)
+        .max(1);
+
+    let path_chars = path_limit_chars
+        .map(|limit| {
+            limit
+                .saturating_sub(path_chars(quarantine_dir))
+                .saturating_sub(join_separator_chars(quarantine_dir))
+                .saturating_sub(prefix.chars().count())
+                .saturating_sub(COLLISION_SUFFIX_RESERVE)
+                .max(1)
+        })
+        .unwrap_or(usize::MAX);
+
+    (filename_bytes, path_chars)
+}
+
+fn truncate_tail(mut text: String, max_bytes: usize, max_chars: usize) -> String {
+    while text.len() > max_bytes || text.chars().count() > max_chars {
+        let next = text
+            .char_indices()
+            .nth(1)
+            .map(|(index, _)| index)
+            .unwrap_or_else(|| text.len());
+        text.drain(..next);
+    }
+    text
+}
+
+#[cfg(windows)]
+fn windows_path_limit() -> Option<usize> {
+    Some(WINDOWS_MAX_PATH_CHARS)
+}
+
+#[cfg(not(windows))]
+fn windows_path_limit() -> Option<usize> {
+    None
+}
+
+#[cfg(windows)]
+fn path_chars(path: &Path) -> usize {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str().encode_wide().count()
+}
+
+#[cfg(not(windows))]
+fn path_chars(path: &Path) -> usize {
+    path.to_string_lossy().chars().count()
+}
+
+fn join_separator_chars(path: &Path) -> usize {
+    usize::from(!path.as_os_str().is_empty())
 }
 
 /// Restore a quarantined file to its original location.
@@ -786,6 +862,50 @@ mod tests {
         assert_eq!(std::fs::read(&ra.quarantined_to).unwrap(), b"first");
         assert_eq!(std::fs::read(&rb.quarantined_to).unwrap(), b"second");
         assert_eq!(list(&q).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn quarantine_name_respects_a_windows_style_path_limit() {
+        let q = PathBuf::from(format!(
+            "C:\\Users\\{}\\AppData\\Local\\com.diskern.app\\Quarantine",
+            "long-user-name".repeat(5)
+        ));
+        let victim = PathBuf::from(format!(
+            "C:\\Users\\{}\\projects\\{}\\target\\debug\\cache.bin",
+            "long-user-name".repeat(5),
+            "deep\\".repeat(40)
+        ));
+
+        let dest = unique_dest_with_path_limit(&q, 1_788_599_624, &victim, Some(260));
+        let name = dest.file_name().unwrap().to_string_lossy();
+
+        assert!(path_chars(&dest) <= 260, "{}", dest.display());
+        assert!(name.len() <= MAX_FILENAME_BYTES, "{name}");
+        assert!(
+            name.ends_with("target_debug_cache.bin"),
+            "the useful tail should survive truncation: {name}"
+        );
+    }
+
+    #[test]
+    fn quarantine_name_leaves_room_for_collision_suffixes() {
+        let q = PathBuf::from(format!(
+            "C:\\Users\\{}\\AppData\\Local\\com.diskern.app\\Quarantine",
+            "long-user-name".repeat(5)
+        ));
+        let victim = PathBuf::from(format!(
+            "C:\\Users\\{}\\projects\\{}\\target\\debug\\cache.bin",
+            "long-user-name".repeat(5),
+            "deep\\".repeat(40)
+        ));
+
+        let dest = unique_dest_with_path_limit(&q, 1_788_599_624, &victim, Some(260));
+        let suffixed = dest.with_file_name(format!(
+            "{}.4294967295",
+            dest.file_name().unwrap().to_string_lossy()
+        ));
+
+        assert!(path_chars(&suffixed) <= 260, "{}", suffixed.display());
     }
 
     #[test]
