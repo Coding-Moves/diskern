@@ -83,7 +83,6 @@ See [docs/RELEASING.md](docs/RELEASING.md). Short version: set the two
 updater-key secrets once, then `git tag vX.Y.Z && git push --tags`.
 
 ## Contributing
-
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for
 setup and guidelines, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for how the pieces fit together.
