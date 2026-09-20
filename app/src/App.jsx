@@ -642,7 +642,8 @@ export default function App() {
 
       {!displayedReport && (
         <section className="empty">
-          <p>Run a read-only scan. Nothing is deleted — ever — without your review.</p>
+          <p> Run a read-only scan of Downloads, a project folder, or another folder you want to understand.
+              Nothing is deleted — ever — without your review.</p>
           <button onClick={runScan} disabled={scanning}>
             {scanning ? "Scanning…" : "Choose a folder to scan"}
           </button>

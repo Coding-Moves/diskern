@@ -1,1 +1,0 @@
-Audit app copy for destructive-sounding language
