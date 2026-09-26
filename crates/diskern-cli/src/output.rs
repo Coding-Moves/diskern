@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -13,6 +13,25 @@ fn write_atomically(
     path: &Path,
     write: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
+    let permissions = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => {
+            let permissions = metadata.permissions();
+            if permissions.readonly() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "destination report is read-only",
+                ));
+            }
+            // Opening without truncation preserves the original export's OS
+            // write-permission checks, even when the parent allows replacement.
+            File::options().write(true).open(path)?;
+            Some(permissions)
+        }
+        Ok(_) => None,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+
     // A bare filename has an empty parent. Keep staging beside the destination
     // so publication stays on the same filesystem; never create parent folders.
     let directory = path
@@ -21,6 +40,10 @@ fn write_atomically(
         .unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
     write(temporary.as_file_mut())?;
+    // Keep staged bytes private until the complete report has been written.
+    if let Some(permissions) = permissions {
+        temporary.as_file().set_permissions(permissions)?;
+    }
     temporary.as_file().sync_all()?;
 
     // persist replaces existing files on all supported platforms. Converting
@@ -64,6 +87,47 @@ mod tests {
         assert_eq!(error.to_string(), "injected write failure");
         assert!(!path.exists());
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_preserves_existing_report_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.json");
+        fs::write(&path, b"old report").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_json(&path, "{}").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"{}\n");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn read_only_reports_are_preserved() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.json");
+        fs::write(&path, b"old report").unwrap();
+        let original_permissions = fs::metadata(&path).unwrap().permissions();
+        let mut read_only = original_permissions.clone();
+        read_only.set_readonly(true);
+        fs::set_permissions(&path, read_only).unwrap();
+
+        let result = write_json(&path, "{}");
+        let contents = fs::read(&path).unwrap();
+        let entries = fs::read_dir(dir.path()).unwrap().count();
+        // Restore permissions before assertions so Windows can remove the fixture.
+        fs::set_permissions(&path, original_permissions).unwrap();
+
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(contents, b"old report");
+        assert_eq!(entries, 1);
     }
 
     #[cfg(unix)]
