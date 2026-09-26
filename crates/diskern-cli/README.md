@@ -67,8 +67,19 @@ nothing will offer to move it.
 | `--output <file>` | stdout | Write the JSON report to a file instead of printing it; requires `--json`. |
 | `--rules <file>` | embedded | Load and validate an external rules database; embedded protected rules remain authoritative. |
 
-Scanning is always read-only — the CLI never modifies, moves, or deletes
-anything.
+Scanning never modifies the files it inspects. `--json --output <file>`
+explicitly writes the completed report to the chosen destination, leaving
+stdout empty and printing a confirmation to stderr. Its parent directory
+must already exist.
+
+File exports are written to a unique temporary file in that directory and
+synced before replacing the destination. A failed write or replacement
+preserves an existing report; a failed export to a new path leaves no
+partial report there. Temporary files are removed on ordinary errors.
+Replacement publishes a new file at the named path, rather than modifying
+an existing inode or following a destination symlink. On Unix, the new
+file has private permissions. An abrupt process termination may leave a
+temporary file behind; full power-loss durability is not guaranteed.
 
 ## Develop
 
