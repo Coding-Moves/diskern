@@ -9,6 +9,8 @@ use diskern_core::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod output;
+
 #[derive(Parser)]
 #[command(
     name = "diskern",
@@ -278,7 +280,7 @@ fn main() -> Result<()> {
                     // survives the terminal. stdout stays clean so the
                     // command composes in scripts either way.
                     Some(path) => {
-                        std::fs::write(&path, format!("{rendered}\n")).with_context(|| {
+                        output::write_json(&path, &rendered).with_context(|| {
                             format!(
                                 "could not write JSON report to '{}'; check that the directory exists and is writable",
                                 path.display()
