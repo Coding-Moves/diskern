@@ -76,13 +76,16 @@ File exports are written to a unique temporary file in that directory and
 synced before replacing the destination. A failed write or replacement
 preserves an existing report; a failed export to a new path leaves no
 partial report there. Temporary files are removed on ordinary errors.
-Replacement publishes a new file at the named path, rather than modifying
-an existing inode or following a destination symlink. Existing regular
-reports must be writable and retain their file permissions; read-only
-reports are rejected. New Unix reports have private permissions. Other
-inode metadata, such as ownership and access-control lists, is not copied.
-An abrupt process termination may leave a temporary file behind; full
-power-loss durability is not guaranteed.
+The destination must be a new path or a writable regular file. Symbolic
+links, directories, special files, and read-only reports are rejected
+without alteration; use the target file path when exporting through a
+symbolic link would otherwise be intended. Existing reports retain their
+file permissions, and new Unix reports have private permissions.
+
+Replacement publishes a new file at the named path rather than modifying
+an existing inode. Other inode metadata, such as ownership and
+access-control lists, is not copied. An abrupt process termination may
+leave a temporary file behind; full power-loss durability is not guaranteed.
 
 ## Develop
 

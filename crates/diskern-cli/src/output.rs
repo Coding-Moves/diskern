@@ -27,7 +27,12 @@ fn write_atomically(
             File::options().write(true).open(path)?;
             Some(permissions)
         }
-        Ok(_) => None,
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "destination must be a regular file; use a file path instead of a symbolic link, directory, or special file",
+            ));
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
@@ -132,8 +137,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn publication_replaces_a_symlink_with_a_private_report() {
-        use std::os::unix::fs::{symlink, PermissionsExt};
+    fn publication_preserves_symlinks_and_their_targets() {
+        use std::os::unix::fs::symlink;
 
         let dir = tempdir().unwrap();
         let target = dir.path().join("original.json");
@@ -141,25 +146,60 @@ mod tests {
         let path = dir.path().join("report.json");
         symlink(&target, &path).unwrap();
 
+        let error = write_json(&path, "{}").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(&target).unwrap(), b"original report");
+        assert_eq!(fs::read_link(&path).unwrap(), target);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_preserves_special_files() {
+        use std::os::unix::fs::FileTypeExt;
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.sock");
+        let _listener = UnixListener::bind(&path).unwrap();
+
+        let error = write_json(&path, "{}").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_socket());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_reports_have_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("report.json");
         write_json(&path, "{}").unwrap();
 
-        assert_eq!(fs::read(&path).unwrap(), b"{}\n");
-        assert_eq!(fs::read(&target).unwrap(), b"original report");
-        let metadata = fs::symlink_metadata(&path).unwrap();
-        assert!(metadata.is_file());
-        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]
     fn replacement_failure_cleans_up_and_preserves_destination() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("report.json");
-        fs::create_dir(&path).unwrap();
         let existing = path.join("keep.txt");
-        fs::write(&existing, b"keep").unwrap();
 
-        let error = write_json(&path, "{}").unwrap_err();
+        // Make the destination invalid after preflight, so this exercises a
+        // persist failure and cleanup rather than only destination validation.
+        let error = write_atomically(&path, |file| {
+            file.write_all(b"{}")?;
+            fs::create_dir(&path)?;
+            fs::write(&existing, b"keep")
+        })
+        .unwrap_err();
 
         assert!(!error.to_string().is_empty());
         assert_eq!(fs::read(&existing).unwrap(), b"keep");
