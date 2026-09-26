@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { runAppOperation } from "../updateCoordinator.js";
 import { humanBytes } from "../format.js";
 
+const PAGE_SIZE = 50;
+
 /**
  * What is sitting in quarantine right now, read back from the manifest on
  * disk rather than from anything this session remembers.
@@ -16,6 +18,7 @@ import { humanBytes } from "../format.js";
 export default function QuarantineSection({ quarantineDir, refreshKey, onRestored }) {
   const [records, setRecords] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [page, setPage] = useState(0);
   const [error, setError] = useState(null);
   const [busyPath, setBusyPath] = useState(null);
   const [purgePhase, setPurgePhase] = useState("idle"); // idle | confirming | working
@@ -24,7 +27,10 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
   const reload = useCallback(async () => {
     if (!quarantineDir) return;
     try {
-      setRecords(await invoke("list_quarantine", { quarantineDir }));
+      const nextRecords = await invoke("list_quarantine", { quarantineDir });
+      setRecords(nextRecords);
+      const nextLastPage = Math.max(0, Math.ceil(nextRecords.length / PAGE_SIZE) - 1);
+      setPage((current) => Math.min(current, nextLastPage));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -74,6 +80,12 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
     }
   }
 
+  const lastPage = Math.max(0, Math.ceil(records.length / PAGE_SIZE) - 1);
+  const currentPage = Math.min(page, lastPage);
+  const first = currentPage * PAGE_SIZE;
+  const visibleRecords = records.slice(first, first + PAGE_SIZE);
+  const working = busyPath !== null || purgePhase === "working";
+
   // Nothing quarantined and nothing to say about it: stay out of the way.
   if (records.length === 0 && !error && !purgeNotice) return null;
 
@@ -90,11 +102,38 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
         <div className="group-body-inner">
           <p className="quarantine-note">
             Moved here, not deleted. Restore puts a file back where it came from.
-            Purge is the only thing in Diskern that deletes, and it deletes only
-            what is listed here.
+            Purge permanently deletes all listed quarantine files, including
+            those on other pages.
           </p>
+          {records.length > PAGE_SIZE && (
+            <nav className="quarantine-pagination" aria-label="Quarantine pages">
+              <p className="quarantine-page-status" role="status" aria-atomic="true">
+                Files {first + 1}–{first + visibleRecords.length} of {records.length}
+                {" · "}Page {currentPage + 1} of {lastPage + 1}
+              </p>
+              <div className="quarantine-page-buttons">
+                <button className="list-toggle" aria-label="First quarantine page"
+                  disabled={working || currentPage === 0} onClick={() => setPage(0)}>
+                  First
+                </button>
+                <button className="list-toggle" aria-label="Previous quarantine page"
+                  disabled={working || currentPage === 0} onClick={() => setPage(Math.max(0, currentPage - 1))}>
+                  Previous
+                </button>
+                <button className="list-toggle" aria-label="Next quarantine page"
+                  disabled={working || currentPage === lastPage} onClick={() => setPage(Math.min(lastPage, currentPage + 1))}>
+                  Next
+                </button>
+                <button className="list-toggle" aria-label="Last quarantine page"
+                  disabled={working || currentPage === lastPage} onClick={() => setPage(lastPage)}>
+                  Last
+                </button>
+              </div>
+            </nav>
+          )}
+
           <ul className="findings">
-            {records.map((r) => (
+            {visibleRecords.map((r) => (
               <li className="finding" key={r.quarantined_to}>
                 <span className="path">{r.original}</span>
                 <span className="size">
@@ -104,7 +143,7 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
                   {busyPath === r.quarantined_to ? (
                     <span className="working">Restoring…</span>
                   ) : (
-                    <button className="quarantine-btn" onClick={() => restore(r)}>
+                    <button className="quarantine-btn" disabled={working} onClick={() => restore(r)}>
                       Restore
                     </button>
                   )}
@@ -116,17 +155,17 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
           {records.length > 0 && (
             <div className="purge">
               {purgePhase === "idle" && (
-                <button className="cancel-btn" onClick={() => setPurgePhase("confirming")}>
+                <button className="cancel-btn" disabled={working} onClick={() => setPurgePhase("confirming")}>
                   Purge quarantine
                 </button>
               )}
               {purgePhase === "confirming" && (
                 <span className="confirm">
                   <span className="confirm-q">
-                    Delete {records.length} file{records.length === 1 ? "" : "s"} for good?
+                    Delete all {records.length} file{records.length === 1 ? "" : "s"} for good?
                     This cannot be undone.
                   </span>
-                  <button className="quarantine-btn confirm-yes" onClick={purge}>
+                  <button className="quarantine-btn confirm-yes" disabled={working} onClick={purge}>
                     Delete
                   </button>
                   <button className="confirm-no" onClick={() => setPurgePhase("idle")}>
