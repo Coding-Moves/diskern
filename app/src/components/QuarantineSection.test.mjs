@@ -267,3 +267,36 @@ test("a pending purge disables page controls and restores until the manifest rel
   assert.equal(rows().length, 0);
   assert.match(document.querySelector(".notice").textContent, /Deleted 103 files/);
 });
+
+for (const staleOutcome of ["success", "failure"]) {
+  test(`an older refresh ${staleOutcome} cannot overwrite a later restore refresh`, async () => {
+    await mount(51);
+    await click("Last quarantine page");
+    const oldRecords = records;
+    const originalInvoke = window.__TAURI_INTERNALS__.invoke;
+    let finishOld;
+    let delayed = false;
+    window.__TAURI_INTERNALS__.invoke = (command, args) => {
+      if (command === "list_quarantine" && !delayed) {
+        delayed = true;
+        return new Promise((resolve, reject) => {
+          finishOld = () => staleOutcome === "success"
+            ? resolve(oldRecords) : reject(new Error("stale refresh failure"));
+        });
+      }
+      return originalInvoke(command, args);
+    };
+    await act(async () => root.render(React.createElement(QuarantineSection, {
+      quarantineDir: "/quarantine",
+      refreshKey: 1,
+      onRestored: (record) => restored.push(record),
+    })));
+    await click("Restore");
+    assert.equal(records.length, 50);
+    await act(async () => finishOld());
+    assert.ok(!document.querySelector('[aria-label="Quarantine pages"]'), "stale records must not restore the pager");
+    assert.match(document.querySelector(".group-meta").textContent, /50 files/);
+    assert.ok(!document.querySelector(".error"), "stale errors must not replace a successful refresh");
+    assert.equal(rowPaths().includes("/source/file-50"), false);
+  });
+}

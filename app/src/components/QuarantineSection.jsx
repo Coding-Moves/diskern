@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { runAppOperation } from "../updateCoordinator.js";
 import { humanBytes } from "../format.js";
@@ -24,21 +24,27 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
   const [purgePhase, setPurgePhase] = useState("idle"); // idle | confirming | working
   const [purgeNotice, setPurgeNotice] = useState(null);
 
+  const latestLoad = useRef(0);
+
   const reload = useCallback(async () => {
+    const load = ++latestLoad.current;
     if (!quarantineDir) return;
     try {
       const nextRecords = await invoke("list_quarantine", { quarantineDir });
+      // A newer refresh may already reflect a completed restore or purge.
+      if (load !== latestLoad.current) return;
       setRecords(nextRecords);
       const nextLastPage = Math.max(0, Math.ceil(nextRecords.length / PAGE_SIZE) - 1);
       setPage((current) => Math.min(current, nextLastPage));
       setError(null);
     } catch (e) {
-      setError(String(e));
+      if (load === latestLoad.current) setError(String(e));
     }
   }, [quarantineDir]);
 
   useEffect(() => {
     reload();
+    return () => { latestLoad.current += 1; };
   }, [reload, refreshKey]);
 
   async function restore(record) {
