@@ -384,6 +384,65 @@ fn scan_json_output_writes_the_stdout_report_to_a_file() {
     assert_eq!(from_file["files_scanned"].as_u64(), Some(6));
 }
 
+/// Replacing a longer existing report must work for a bare relative filename
+/// on every supported platform, without leaving a suffix or a temporary file.
+#[test]
+fn scan_json_output_atomically_replaces_an_existing_relative_report() {
+    let root = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    let path = out_dir.path().join("report.json");
+    let old_report = format!("{{\"previous\":\"{}\"}}\n", "x".repeat(4096));
+    fs::write(&path, old_report).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_diskern"))
+        .current_dir(out_dir.path())
+        .arg("scan")
+        .arg(root.path())
+        .args(["--json", "--output", "report.json"])
+        .output()
+        .expect("diskern should start");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Wrote JSON report to report.json"));
+    let written = fs::read(&path).unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&written)
+        .expect("replacement must contain one complete JSON document");
+    assert_eq!(report["files_scanned"], 0);
+    assert!(report.get("previous").is_none());
+    assert!(written.ends_with(b"\n"));
+    assert_eq!(fs::read_dir(out_dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn scan_json_output_reports_replacement_failure_without_leaving_temporary_files() {
+    let root = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    let path = out_dir.path().join("report.json");
+    fs::create_dir(&path).unwrap();
+    let existing = path.join("keep.txt");
+    fs::write(&existing, b"keep").unwrap();
+
+    let output = scan(root.path(), &["--json", "--output", path.to_str().unwrap()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not write JSON report") && stderr.contains("report.json"),
+        "error should name the destination: {stderr}"
+    );
+    assert!(!stderr.contains("Wrote JSON report"));
+    assert_eq!(fs::read(&existing).unwrap(), b"keep");
+    assert_eq!(fs::read_dir(out_dir.path()).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&path).unwrap().count(), 1);
+}
+
 #[test]
 fn scan_output_without_json_is_rejected() {
     // The flag only makes sense in the JSON path, so clap turns the
@@ -432,6 +491,8 @@ fn scan_output_to_an_unwritable_path_exits_1_with_a_friendly_error() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(output.stdout.is_empty());
+    assert!(!report_path.parent().unwrap().exists());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("could not write JSON report") && stderr.contains("missing"),
