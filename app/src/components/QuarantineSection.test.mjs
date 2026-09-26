@@ -268,6 +268,61 @@ test("a pending purge disables page controls and restores until the manifest rel
   assert.match(document.querySelector(".notice").textContent, /Deleted 103 files/);
 });
 
+test("purge failure details stay hidden until asked for, then show every message (#192)", async () => {
+  await mount(2);
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  window.__TAURI_INTERNALS__.invoke = (command, args) => {
+    if (command !== "purge_quarantine") return invoke(command, args);
+    return Promise.resolve({
+      files_removed: 0,
+      bytes_removed: 0,
+      failed: ["/quarantine/item-0: Permission denied", "/quarantine/item-1: Device busy"],
+    });
+  };
+  await click("Purge quarantine");
+  await click("Delete");
+  assert.match(document.querySelector(".notice").textContent, /2 could not be removed/);
+  assert.equal(document.querySelector(".purge-failure-details"), null);
+
+  const callsBeforeToggle = calls.length;
+  await click("Show 2 failure details");
+  assert.equal(calls.length, callsBeforeToggle, "opening details must not trigger another purge");
+  const details = [...document.querySelectorAll(".purge-failure-details li")].map((li) => li.textContent);
+  assert.deepEqual(details, [
+    "/quarantine/item-0: Permission denied",
+    "/quarantine/item-1: Device busy",
+  ]);
+
+  await click("Hide failure details");
+  assert.equal(document.querySelector(".purge-failure-details"), null);
+  assert.equal(calls.length, callsBeforeToggle, "closing details must not trigger another purge either");
+});
+
+test("a later fully-successful purge clears the previous attempt's failure details", async () => {
+  await mount(1);
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  let response = {
+    files_removed: 0,
+    bytes_removed: 0,
+    failed: ["/quarantine/item-0: Permission denied"],
+  };
+  window.__TAURI_INTERNALS__.invoke = (command, args) => {
+    if (command !== "purge_quarantine") return invoke(command, args);
+    return Promise.resolve(response);
+  };
+  await click("Purge quarantine");
+  await click("Delete");
+  await click("Show 1 failure detail");
+  assert.equal(document.querySelectorAll(".purge-failure-details li").length, 1);
+
+  response = { files_removed: 1, bytes_removed: 1, failed: [] };
+  await click("Purge quarantine");
+  await click("Delete");
+  assert.equal(document.querySelector(".purge-failure-details"), null);
+  assert.equal([...document.querySelectorAll("button")].some((b) => /failure detail/.test(b.textContent)), false);
+  assert.match(document.querySelector(".notice").textContent, /Deleted 1 file/);
+});
+
 for (const staleOutcome of ["success", "failure"]) {
   test(`an older refresh ${staleOutcome} cannot overwrite a later restore refresh`, async () => {
     await mount(51);

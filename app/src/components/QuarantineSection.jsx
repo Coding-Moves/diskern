@@ -23,6 +23,8 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
   const [busyPath, setBusyPath] = useState(null);
   const [purgePhase, setPurgePhase] = useState("idle"); // idle | confirming | working
   const [purgeNotice, setPurgeNotice] = useState(null);
+  const [failedDetails, setFailedDetails] = useState([]);
+  const [showFailedDetails, setShowFailedDetails] = useState(false);
 
   const latestLoad = useRef(0);
 
@@ -69,6 +71,11 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
   async function purge() {
     setError(null);
     setPurgePhase("working");
+    // Clear the previous attempt's failure details up front: a later
+    // attempt's own result (empty or not) replaces them below, so nothing
+    // stale from a prior purge can survive past this one.
+    setFailedDetails([]);
+    setShowFailedDetails(false);
     try {
       await runAppOperation(async () => {
         const summary = await invoke("purge_quarantine", { quarantineDir });
@@ -77,6 +84,7 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
             ` · ${humanBytes(summary.bytes_removed)} freed` +
             (summary.failed.length ? ` · ${summary.failed.length} could not be removed` : "")
         );
+        setFailedDetails(summary.failed);
         await reload();
       });
     } catch (e) {
@@ -184,6 +192,27 @@ export default function QuarantineSection({ quarantineDir, refreshKey, onRestore
           )}
 
           {purgeNotice && <p className="notice">{purgeNotice}</p>}
+          {failedDetails.length > 0 && (
+            <>
+              <button
+                className="list-toggle"
+                onClick={() => setShowFailedDetails((v) => !v)}
+              >
+                {showFailedDetails
+                  ? "Hide failure details"
+                  : `Show ${failedDetails.length} failure detail${
+                      failedDetails.length === 1 ? "" : "s"
+                    }`}
+              </button>
+              {showFailedDetails && (
+                <ul className="purge-failure-details">
+                  {failedDetails.map((detail, i) => (
+                    <li key={i}>{detail}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
           {error && <p className="error">{error}</p>}
         </div>
       </div>
