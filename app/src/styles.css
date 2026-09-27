@@ -388,6 +388,16 @@ button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
 .purge .confirm { flex-wrap: wrap; }
 .purge .confirm-q { color: #c0392b; opacity: 1; }
 
+/* Per-file purge failures: same treatment as duplicate paths — small,
+   monospace, and wrapping so a long path never widens the window. */
+.purge-failure-details { list-style: none; padding: 0.3rem 0 0; margin: 0; }
+.purge-failure-details li {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
 /* Update status toast: a small card pinned to the bottom corner, not a
    modal — checking and downloading must never block the app, and the
    confirm dialog should never arrive without warning. position:fixed
