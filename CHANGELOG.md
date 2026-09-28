@@ -46,6 +46,9 @@ All notable changes to Diskern are documented here. The format follows
   waits and says so — then prompts once the app goes quiet — and a failed
   download or install reads "Update failed — you can keep using Diskern"
   rather than looking like the app froze
+- The site homepage now includes a Trust & Safety section explaining the
+  scan, review, and quarantine flow and that safety verdicts are
+  rule-based
 
 ### Fixed
 
