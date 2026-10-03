@@ -52,8 +52,8 @@ const COLLISION_SUFFIX_RESERVE: usize = 11;
 /// is still in flight.
 ///
 /// One lock for the process rather than one per directory: these
-/// operations are rare, short, and a second quarantine directory in one
-/// process isn't a thing that happens.
+/// operations must stay ordered, including copies that take longer. A
+/// single lock also covers callers sharing the directory through path aliases.
 static MANIFEST: Mutex<()> = Mutex::new(());
 
 /// A poisoned lock means an earlier holder panicked mid-operation. The
@@ -81,6 +81,25 @@ pub fn quarantine(
     verdict: Verdict,
     quarantine_dir: &Path,
 ) -> Result<QuarantineRecord> {
+    quarantine_at(file, verdict, quarantine_dir, now_epoch())
+}
+
+fn quarantine_at(
+    file: &Path,
+    verdict: Verdict,
+    quarantine_dir: &Path,
+    stamp: i64,
+) -> Result<QuarantineRecord> {
+    quarantine_checked(file, verdict, quarantine_dir, stamp, || Ok(()))
+}
+
+fn quarantine_checked(
+    file: &Path,
+    verdict: Verdict,
+    quarantine_dir: &Path,
+    stamp: i64,
+    before_move: impl Fn() -> Result<()>,
+) -> Result<QuarantineRecord> {
     match verdict {
         Verdict::Protected | Verdict::Risky => {
             return Err(GenomeError::Rules(format!(
@@ -91,9 +110,14 @@ pub fn quarantine(
         Verdict::Safe | Verdict::Review => {}
     }
 
+    // Hold the same lock as restore/purge through selection, movement and
+    // manifest append. Locking only the append lets two tasks select the
+    // same flattened name before either one has reserved it.
+    let _guard = manifest_lock();
+    // Reject an already stale request before making any filesystem changes.
+    // Repeat this check below in case authority changes during preparation.
+    before_move()?;
     std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
-
-    let stamp = now_epoch();
     let record = QuarantineRecord {
         original: file.to_path_buf(),
         quarantined_to: unique_dest(quarantine_dir, stamp, file),
@@ -108,11 +132,13 @@ pub fn quarantine(
     // cannot be read back: the exact loss this manifest exists to stop.
     let line = encode(&record)?;
 
+    // A queued request may have waited behind a long copy. Validate its
+    // snapshot and authority only after that wait, immediately before moving.
+    before_move()?;
     move_file(file, &record.quarantined_to)?;
 
     // The move happened; the record must follow it or the move must not
     // stand. Anything else strands the file.
-    let _guard = manifest_lock();
     if let Err(e) = append_line(quarantine_dir, &line) {
         // Best effort, and the only sensible order: the original was
         // sitting here a moment ago, so putting it back is the outcome
@@ -142,7 +168,9 @@ pub fn quarantine_finding(
 
 /// Report-bound quarantine with a final authority check supplied by the
 /// caller. Tauri uses this to reject a lease invalidated by a newer scan
-/// without holding the report mutex over filesystem I/O.
+/// without holding the report mutex over filesystem I/O. The callback runs
+/// under the manifest lock before creating the directory and again immediately
+/// before moving, so it must not call another action that acquires that lock.
 pub fn quarantine_finding_with_authorization<F>(
     path: &Path,
     report: &report::Report,
@@ -173,14 +201,21 @@ where
         )));
     }
 
-    ensure_entry_is_current(&finding.entry)?;
-    if !still_authorized() {
-        return Err(GenomeError::Rules(
-            "scan report was superseded; refusing to quarantine — scan again".into(),
-        ));
-    }
-
-    quarantine(&finding.entry.path, effective_verdict, quarantine_dir)
+    quarantine_checked(
+        &finding.entry.path,
+        effective_verdict,
+        quarantine_dir,
+        now_epoch(),
+        || {
+            ensure_entry_is_current(&finding.entry)?;
+            if !still_authorized() {
+                return Err(GenomeError::Rules(
+                    "scan report was superseded; refusing to quarantine — scan again".into(),
+                ));
+            }
+            Ok(())
+        },
+    )
 }
 
 /// Check the metadata captured by the scanner, excluding atime.
@@ -188,7 +223,7 @@ where
 /// Size, modification time, and symlink-ness catch ordinary replacement and
 /// mutation. They are not a universal filesystem identity proof: platforms
 /// with coarse timestamps and an attacker able to replace a path in the final
-/// rename window remain outside this bounded path-based guarantee.
+/// move window remain outside this bounded path-based guarantee.
 fn ensure_entry_is_current(entry: &FileEntry) -> Result<()> {
     let metadata = std::fs::symlink_metadata(&entry.path).map_err(|e| io_err(&entry.path, e))?;
     let modified = metadata.modified().ok().and_then(to_epoch);
@@ -238,7 +273,7 @@ fn unique_dest_with_path_limit(
     let base = format!("{prefix}{flat}");
     let mut candidate = quarantine_dir.join(&base);
     let mut n = 1u32;
-    while candidate.exists() {
+    while std::fs::symlink_metadata(&candidate).is_ok() {
         candidate = quarantine_dir.join(format!("{base}.{n}"));
         n += 1;
     }
@@ -308,8 +343,7 @@ fn join_separator_chars(path: &Path) -> usize {
 
 /// Restore a quarantined file to its original location.
 ///
-/// Refuses when something is already there. Both halves of `move_file`
-/// replace an existing destination without asking, and the files most
+/// Refuses when something is already there. The files most
 /// likely to be quarantined are the ones most likely to come back: a
 /// browser cache is `safe` precisely because the browser rebuilds it, so
 /// "quarantine the cache, keep browsing, change your mind" ends with the
@@ -508,31 +542,87 @@ fn write_manifest(quarantine_dir: &Path, records: &[QuarantineRecord]) -> Result
 
 /// Move a file, in the one direction this crate is allowed to move things.
 ///
-/// `rename` is the fast path and fails with `EXDEV` when the two paths are
-/// on different filesystems — which is the normal case here, not an edge
-/// one: quarantine lives in the app's local data directory, and the files
-/// being quarantined come from wherever the user pointed the scan, which
-/// may well be a second drive or a `/home` on its own partition.
-///
-/// Both directions go through this. The quarantine path used to handle the
-/// fallback and the restore path didn't, so the exact case the move
-/// survived was the case the undo failed on.
+/// A hard link reserves the destination atomically without replacing an
+/// existing entry. Unlinking the source then completes the same-filesystem
+/// move. Filesystems without hard links use an exclusive copy instead.
+/// Both quarantine and restore share this no-clobber guarantee.
 fn move_file(from: &Path, to: &Path) -> Result<()> {
-    if std::fs::rename(from, to).is_ok() {
-        return Ok(());
+    if std::fs::hard_link(from, to).is_ok() {
+        return finish_move(from, to);
     }
     copy_then_remove(from, to)
 }
 
-/// The fallback half of [`move_file`], separated so it can be tested
-/// without two filesystems to hand.
-///
-/// The remove comes last on purpose: if it fails, the file still exists in
-/// both places, which is recoverable. Removing first and failing to copy
-/// would not be.
+/// Copy into a newly reserved destination before removing the source.
+/// Never follow a source symlink in this fallback: copying its target and
+/// deleting the link would silently change what a later restore returns.
 fn copy_then_remove(from: &Path, to: &Path) -> Result<()> {
-    std::fs::copy(from, to).map_err(|e| io_err(from, e))?;
-    std::fs::remove_file(from).map_err(|e| io_err(from, e))
+    let metadata = std::fs::symlink_metadata(from).map_err(|e| io_err(from, e))?;
+    if !metadata.is_file() {
+        return Err(io_err(
+            from,
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "cross-filesystem copy requires a regular file",
+            ),
+        ));
+    }
+    let mut source = std::fs::File::open(from).map_err(|e| io_err(from, e))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Keep partial copies private until the source permissions are set.
+        options.mode(0o600);
+    }
+    let mut destination = options.open(to).map_err(|e| io_err(to, e))?;
+    let copied = std::io::copy(&mut source, &mut destination)
+        .and_then(|_| destination.set_permissions(metadata.permissions()));
+    drop(destination);
+    if let Err(error) = copied {
+        // We created this entry; the source is still intact on copy failure.
+        let _ = std::fs::remove_file(to);
+        return Err(io_err(to, error));
+    }
+    finish_move(from, to)
+}
+
+/// Remove the source only after creating the destination. On an ordinary
+/// removal error, undo our new entry so failed actions remain retryable and
+/// do not leave untracked payloads behind. Never remove the source on rollback.
+fn finish_move(from: &Path, to: &Path) -> Result<()> {
+    if let Err(error) = std::fs::remove_file(from) {
+        if std::fs::symlink_metadata(from).is_err() {
+            // Another actor may already have removed the source. Keep the
+            // destination rather than risk deleting the last surviving copy.
+            return Err(io_err(
+                from,
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{error}; source could not be verified, keeping destination {}",
+                        to.display()
+                    ),
+                ),
+            ));
+        }
+        if let Err(cleanup) = std::fs::remove_file(to) {
+            return Err(io_err(
+                from,
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{error}; could not remove incomplete destination {}: {cleanup}; \
+                         source was not removed by this operation",
+                        to.display()
+                    ),
+                ),
+            ));
+        }
+        return Err(io_err(from, error));
+    }
+    Ok(())
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> GenomeError {
@@ -659,6 +749,52 @@ mod tests {
         let record = quarantine_finding(&target, &report, &rules, &quarantine_dir).unwrap();
         assert!(!target.exists());
         assert!(record.quarantined_to.exists());
+    }
+
+    #[test]
+    fn final_authorization_runs_under_the_manifest_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let q = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+        let result = quarantine_finding_with_authorization(&target, &report, &rules, &q, || {
+            assert!(
+                matches!(
+                    MANIFEST.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ),
+                "authority must be checked after waiting for other filesystem actions"
+            );
+            false
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"cache");
+        assert!(
+            !q.exists(),
+            "rejected requests must not create a quarantine directory"
+        );
+        assert!(list(&q).unwrap().is_empty());
+    }
+
+    #[test]
+    fn authority_invalidated_during_preparation_still_prevents_the_move() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let q = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+        let checks = std::cell::Cell::new(0);
+        let result = quarantine_finding_with_authorization(&target, &report, &rules, &q, || {
+            checks.set(checks.get() + 1);
+            checks.get() == 1
+        });
+        assert!(result.is_err());
+        assert_eq!(checks.get(), 2);
+        assert_eq!(std::fs::read(&target).unwrap(), b"cache");
+        assert!(list(&q).unwrap().is_empty());
     }
 
     #[test]
@@ -793,6 +929,97 @@ mod tests {
     }
 
     #[test]
+    fn source_disappearance_keeps_the_surviving_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("missing-source");
+        let to = dir.path().join("destination");
+        std::fs::write(&to, b"last copy").unwrap();
+        let error = finish_move(&from, &to).unwrap_err();
+        assert!(error.to_string().contains("keeping destination"));
+        assert_eq!(std::fs::read(&to).unwrap(), b"last copy");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_source_removal_rolls_back_the_new_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let parent = dir.path().join("source-directory");
+            std::fs::create_dir(&parent).unwrap();
+            let from = parent.join("source");
+            let to = dir.path().join("destination");
+            std::fs::write(&from, b"keep me").unwrap();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let result = mover(&from, &to);
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // Root can bypass directory permissions, as in some CI containers.
+            if result.is_ok() {
+                assert!(!from.exists());
+                assert_eq!(std::fs::read(&to).unwrap(), b"keep me");
+                continue;
+            }
+            assert_eq!(std::fs::read(&from).unwrap(), b"keep me");
+            assert!(
+                !to.exists(),
+                "failed moves must not strand an untracked destination"
+            );
+        }
+    }
+
+    #[test]
+    fn neither_move_path_overwrites_an_existing_destination() {
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let from = dir.path().join("source");
+            let to = dir.path().join("occupied");
+            std::fs::write(&from, b"source bytes").unwrap();
+            std::fs::write(&to, b"existing bytes").unwrap();
+            assert!(mover(&from, &to).is_err());
+            assert_eq!(std::fs::read(&from).unwrap(), b"source bytes");
+            assert_eq!(std::fs::read(&to).unwrap(), b"existing bytes");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn neither_move_path_overwrites_a_dangling_symlink() {
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let from = dir.path().join("source");
+            let to = dir.path().join("occupied");
+            let missing = dir.path().join("missing");
+            std::fs::write(&from, b"source bytes").unwrap();
+            std::os::unix::fs::symlink(&missing, &to).unwrap();
+            assert!(mover(&from, &to).is_err());
+            assert_eq!(std::fs::read(&from).unwrap(), b"source bytes");
+            assert_eq!(std::fs::read_link(&to).unwrap(), missing);
+            assert!(!missing.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_fallback_preserves_permissions_and_rejects_symlink_sources() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("source");
+        let to = dir.path().join("destination");
+        let alias = dir.path().join("alias");
+        std::fs::write(&from, b"data").unwrap();
+        std::fs::set_permissions(&from, std::fs::Permissions::from_mode(0o640)).unwrap();
+        symlink(&from, &alias).unwrap();
+        assert!(copy_then_remove(&alias, &to).is_err());
+        assert!(std::fs::symlink_metadata(&alias).unwrap().is_symlink());
+        assert!(!to.exists());
+        copy_then_remove(&from, &to).unwrap();
+        assert_eq!(
+            std::fs::metadata(&to).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[test]
     fn restore_recreates_a_directory_that_was_removed_meanwhile() {
         let dir = tempfile::tempdir().unwrap();
         let q = dir.path().join("quarantine");
@@ -862,6 +1089,58 @@ mod tests {
         assert_eq!(std::fs::read(&ra.quarantined_to).unwrap(), b"first");
         assert_eq!(std::fs::read(&rb.quarantined_to).unwrap(), b"second");
         assert_eq!(list(&q).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn simultaneous_flattened_collisions_remain_individually_restorable() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let a = dir.path().join("a_b");
+        std::fs::create_dir(dir.path().join("a")).unwrap();
+        let b = dir.path().join("a/b");
+        std::fs::write(&a, b"first").unwrap();
+        std::fs::write(&b, b"second").unwrap();
+        let start = std::sync::Barrier::new(2);
+        // Force identical timestamps instead of depending on wall-clock
+        // scheduling. Both workers race for the same initial destination.
+        let (ra, rb) = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                quarantine_at(&a, Verdict::Safe, &q, 123).unwrap()
+            });
+            let second = scope.spawn(|| {
+                start.wait();
+                quarantine_at(&b, Verdict::Safe, &q, 123).unwrap()
+            });
+            (first.join().unwrap(), second.join().unwrap())
+        });
+        assert_ne!(ra.quarantined_to, rb.quarantined_to);
+        assert_eq!(std::fs::read(&ra.quarantined_to).unwrap(), b"first");
+        assert_eq!(std::fs::read(&rb.quarantined_to).unwrap(), b"second");
+        assert_eq!(list(&q).unwrap().len(), 2);
+        restore_from_manifest(&q, &ra.quarantined_to).unwrap();
+        restore_from_manifest(&q, &rb.quarantined_to).unwrap();
+        assert_eq!(std::fs::read(&a).unwrap(), b"first");
+        assert_eq!(std::fs::read(&b).unwrap(), b"second");
+        assert!(list(&q).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_selection_skips_a_dangling_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        std::fs::create_dir(&q).unwrap();
+        let source = dir.path().join("source");
+        std::fs::write(&source, b"data").unwrap();
+        let occupied = unique_dest(&q, 123, &source);
+        let missing = dir.path().join("missing");
+        std::os::unix::fs::symlink(&missing, &occupied).unwrap();
+        let record = quarantine_at(&source, Verdict::Safe, &q, 123).unwrap();
+        assert_ne!(record.quarantined_to, occupied);
+        assert_eq!(std::fs::read_link(&occupied).unwrap(), missing);
+        restore_from_manifest(&q, &record.quarantined_to).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), b"data");
     }
 
     #[test]
