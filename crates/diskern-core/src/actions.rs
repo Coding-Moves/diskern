@@ -52,8 +52,8 @@ const COLLISION_SUFFIX_RESERVE: usize = 11;
 /// is still in flight.
 ///
 /// One lock for the process rather than one per directory: these
-/// operations are rare, short, and a second quarantine directory in one
-/// process isn't a thing that happens.
+/// operations must stay ordered, including copies that take longer. A
+/// single lock also covers callers sharing the directory through path aliases.
 static MANIFEST: Mutex<()> = Mutex::new(());
 
 /// A poisoned lock means an earlier holder panicked mid-operation. The
@@ -221,7 +221,7 @@ where
 /// Size, modification time, and symlink-ness catch ordinary replacement and
 /// mutation. They are not a universal filesystem identity proof: platforms
 /// with coarse timestamps and an attacker able to replace a path in the final
-/// rename window remain outside this bounded path-based guarantee.
+/// move window remain outside this bounded path-based guarantee.
 fn ensure_entry_is_current(entry: &FileEntry) -> Result<()> {
     let metadata = std::fs::symlink_metadata(&entry.path).map_err(|e| io_err(&entry.path, e))?;
     let modified = metadata.modified().ok().and_then(to_epoch);
@@ -341,8 +341,7 @@ fn join_separator_chars(path: &Path) -> usize {
 
 /// Restore a quarantined file to its original location.
 ///
-/// Refuses when something is already there. Both halves of `move_file`
-/// replace an existing destination without asking, and the files most
+/// Refuses when something is already there. The files most
 /// likely to be quarantined are the ones most likely to come back: a
 /// browser cache is `safe` precisely because the browser rebuilds it, so
 /// "quarantine the cache, keep browsing, change your mind" ends with the

@@ -136,15 +136,19 @@ selection through the move and manifest append (including rollback on append
 failure). Restore-from-manifest and purge share that mutex. This prevents two
 files whose names flatten alike from selecting the same destination, and keeps
 manifest rewrites from dropping a concurrent append. Copying a large file holds
-the lock for the duration of that operation.
+the lock for the duration of that operation. Report metadata and the caller's
+scan authority are rechecked under the lock immediately before the move, so
+requests waiting behind another action cannot use an already stale approval.
 
 Moves reserve destinations without replacing existing entries: a hard link
 followed by source removal on supported filesystems, or a copy opened with
 `create_new(true)` otherwise. Broken symlinks also count as occupied names.
 The copy fallback preserves file permissions and only accepts regular files;
 it refuses symlinks rather than copying their targets. If source removal fails,
-both copies remain. These steps are not an atomic transaction or a power-loss
-recovery mechanism.
+the move attempts to remove its new destination while leaving the source intact.
+If the source can no longer be verified, it preserves the destination; cleanup
+failures and retained destination paths are reported in the error. These steps
+are not an atomic transaction or a power-loss recovery mechanism.
 
 The mutex is process-local. **Do not run independent processes against the same
 quarantine directory:** payload creation refuses to overwrite another entry,
