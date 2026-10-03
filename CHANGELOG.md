@@ -49,6 +49,10 @@ All notable changes to Diskern are documented here. The format follows
 
 ### Fixed
 
+- Concurrent quarantine operations now serialize destination selection, movement
+  and manifest updates; quarantine and restore refuse to overwrite existing
+  destinations, including during cross-filesystem copies (#195)
+
 - The CLI scan report now shows a risky finding's real size on its row
   instead of "0 B"; the risky section's totals are labelled "reclaimable"
   so the zero still reads as nothing on offer, never as the file's size

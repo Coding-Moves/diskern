@@ -129,6 +129,28 @@ no frontend can accidentally weaken them.
 plain language; it can never change a verdict. This keeps the engine fully
 auditable and offline-capable.
 
+## Quarantine destination safety
+
+Within one process, quarantine holds the manifest mutex from destination
+selection through the move and manifest append (including rollback on append
+failure). Restore-from-manifest and purge share that mutex. This prevents two
+files whose names flatten alike from selecting the same destination, and keeps
+manifest rewrites from dropping a concurrent append. Copying a large file holds
+the lock for the duration of that operation.
+
+Moves reserve destinations without replacing existing entries: a hard link
+followed by source removal on supported filesystems, or a copy opened with
+`create_new(true)` otherwise. Broken symlinks also count as occupied names.
+The copy fallback preserves file permissions and only accepts regular files;
+it refuses symlinks rather than copying their targets. If source removal fails,
+both copies remain. These steps are not an atomic transaction or a power-loss
+recovery mechanism.
+
+The mutex is process-local. **Do not run independent processes against the same
+quarantine directory:** payload creation refuses to overwrite another entry,
+but manifest updates are not protected by an OS-level lock. Cross-process
+locking and crash journaling belong to the recovery proposal below.
+
 ## Proposed quarantine recovery
 
 The [quarantine crash recovery proposal](QUARANTINE-RECOVERY.md) documents
