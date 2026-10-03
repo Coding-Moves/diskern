@@ -249,7 +249,7 @@ fn unique_dest_with_path_limit(
     let base = format!("{prefix}{flat}");
     let mut candidate = quarantine_dir.join(&base);
     let mut n = 1u32;
-    while candidate.exists() {
+    while std::fs::symlink_metadata(&candidate).is_ok() {
         candidate = quarantine_dir.join(format!("{base}.{n}"));
         n += 1;
     }
@@ -975,6 +975,24 @@ mod tests {
         assert_eq!(std::fs::read(&a).unwrap(), b"first");
         assert_eq!(std::fs::read(&b).unwrap(), b"second");
         assert!(list(&q).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_selection_skips_a_dangling_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        std::fs::create_dir(&q).unwrap();
+        let source = dir.path().join("source");
+        std::fs::write(&source, b"data").unwrap();
+        let occupied = unique_dest(&q, 123, &source);
+        let missing = dir.path().join("missing");
+        std::os::unix::fs::symlink(&missing, &occupied).unwrap();
+        let record = quarantine_at(&source, Verdict::Safe, &q, 123).unwrap();
+        assert_ne!(record.quarantined_to, occupied);
+        assert_eq!(std::fs::read_link(&occupied).unwrap(), missing);
+        restore_from_manifest(&q, &record.quarantined_to).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), b"data");
     }
 
     #[test]
