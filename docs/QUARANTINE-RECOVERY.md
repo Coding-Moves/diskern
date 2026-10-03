@@ -27,7 +27,7 @@ with observed files. Do not infer ownership from a filename or file size alone.
 
 Keep legacy `manifest.jsonl` readable. New records are authoritative in a separate
 v2 store; do not dual-write them into the legacy manifest. This avoids two sources
-of truth and prevents an old binary from treating a pending v2 payload as purgable.
+of truth and prevents an old binary from treating a pending v2 payload as purgeable.
 No automatic migration or deletion of legacy records is part of the first rollout.
 
 Scope: ordinary regular files selected through the existing authoritative report
@@ -203,7 +203,7 @@ must not automatically delete or overwrite either source or payload.
 | --- | --- |
 | `Prepared`; unchanged source only, no staging/payload | Mark `Aborted`; retain the record; leave source untouched. |
 | `Prepared`; source plus partial staging | Attention: keep both. Offer an explicit discard of the owned partial copy only after verifying source; do not treat it as a complete restore candidate. |
-| `Prepared` or `PayloadReady`; no source, verified payload | Publish `Committed` idempotently and expose one restoreable item. Revalidate relevant directory durability before finalizing. |
+| `Prepared` or `PayloadReady`; no source, verified payload | Publish `Committed` idempotently and expose one restorable item. Revalidate relevant directory durability before finalizing. |
 | `Prepared` or `PayloadReady`; verified source and verified payload | Attention: preserve both. Offer keeping the source and discarding the owned extra copy, or resuming quarantine after fresh authorization. Neither option is automatic. |
 | Any nonterminal record; source replaced or payload mismatches | Attention with both paths and reason; no automatic mutation of either file. |
 | Any active record; both source and payload absent | Attention: retain original-path evidence and report missing data; never claim successful recovery. |
