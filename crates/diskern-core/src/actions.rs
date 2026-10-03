@@ -547,7 +547,7 @@ fn write_manifest(quarantine_dir: &Path, records: &[QuarantineRecord]) -> Result
 /// Both quarantine and restore share this no-clobber guarantee.
 fn move_file(from: &Path, to: &Path) -> Result<()> {
     if std::fs::hard_link(from, to).is_ok() {
-        return std::fs::remove_file(from).map_err(|e| io_err(from, e));
+        return finish_move(from, to);
     }
     copy_then_remove(from, to)
 }
@@ -584,8 +584,44 @@ fn copy_then_remove(from: &Path, to: &Path) -> Result<()> {
         let _ = std::fs::remove_file(to);
         return Err(io_err(to, error));
     }
-    // If removal fails, keep both copies rather than lose the original bytes.
-    std::fs::remove_file(from).map_err(|e| io_err(from, e))
+    finish_move(from, to)
+}
+
+/// Remove the source only after creating the destination. On an ordinary
+/// removal error, undo our new entry so failed actions remain retryable and
+/// do not leave untracked payloads behind. Never remove the source on rollback.
+fn finish_move(from: &Path, to: &Path) -> Result<()> {
+    if let Err(error) = std::fs::remove_file(from) {
+        if std::fs::symlink_metadata(from).is_err() {
+            // Another actor may already have removed the source. Keep the
+            // destination rather than risk deleting the last surviving copy.
+            return Err(io_err(
+                from,
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{error}; source could not be verified, keeping destination {}",
+                        to.display()
+                    ),
+                ),
+            ));
+        }
+        if let Err(cleanup) = std::fs::remove_file(to) {
+            return Err(io_err(
+                from,
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{error}; could not remove incomplete destination {}: {cleanup}; \
+                         source was not removed by this operation",
+                        to.display()
+                    ),
+                ),
+            ));
+        }
+        return Err(io_err(from, error));
+    }
+    Ok(())
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> GenomeError {
@@ -866,6 +902,45 @@ mod tests {
 
         assert!(!from.exists());
         assert_eq!(std::fs::read(&to).unwrap(), b"data");
+    }
+
+    #[test]
+    fn source_disappearance_keeps_the_surviving_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("missing-source");
+        let to = dir.path().join("destination");
+        std::fs::write(&to, b"last copy").unwrap();
+        let error = finish_move(&from, &to).unwrap_err();
+        assert!(error.to_string().contains("keeping destination"));
+        assert_eq!(std::fs::read(&to).unwrap(), b"last copy");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_source_removal_rolls_back_the_new_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let parent = dir.path().join("source-directory");
+            std::fs::create_dir(&parent).unwrap();
+            let from = parent.join("source");
+            let to = dir.path().join("destination");
+            std::fs::write(&from, b"keep me").unwrap();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let result = mover(&from, &to);
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // Root can bypass directory permissions, as in some CI containers.
+            if result.is_ok() {
+                assert!(!from.exists());
+                assert_eq!(std::fs::read(&to).unwrap(), b"keep me");
+                continue;
+            }
+            assert_eq!(std::fs::read(&from).unwrap(), b"keep me");
+            assert!(
+                !to.exists(),
+                "failed moves must not strand an untracked destination"
+            );
+        }
     }
 
     #[test]
