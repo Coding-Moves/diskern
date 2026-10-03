@@ -545,11 +545,15 @@ fn copy_then_remove(from: &Path, to: &Path) -> Result<()> {
         ));
     }
     let mut source = std::fs::File::open(from).map_err(|e| io_err(from, e))?;
-    let mut destination = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(to)
-        .map_err(|e| io_err(to, e))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Keep partial copies private until the source permissions are set.
+        options.mode(0o600);
+    }
+    let mut destination = options.open(to).map_err(|e| io_err(to, e))?;
     let copied = std::io::copy(&mut source, &mut destination)
         .and_then(|_| destination.set_permissions(metadata.permissions()));
     drop(destination);
