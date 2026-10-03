@@ -508,30 +508,46 @@ fn write_manifest(quarantine_dir: &Path, records: &[QuarantineRecord]) -> Result
 
 /// Move a file, in the one direction this crate is allowed to move things.
 ///
-/// `rename` is the fast path and fails with `EXDEV` when the two paths are
-/// on different filesystems — which is the normal case here, not an edge
-/// one: quarantine lives in the app's local data directory, and the files
-/// being quarantined come from wherever the user pointed the scan, which
-/// may well be a second drive or a `/home` on its own partition.
-///
-/// Both directions go through this. The quarantine path used to handle the
-/// fallback and the restore path didn't, so the exact case the move
-/// survived was the case the undo failed on.
+/// A hard link reserves the destination atomically without replacing an
+/// existing entry. Unlinking the source then completes the same-filesystem
+/// move. Filesystems without hard links use an exclusive copy instead.
+/// Both quarantine and restore share this no-clobber guarantee.
 fn move_file(from: &Path, to: &Path) -> Result<()> {
-    if std::fs::rename(from, to).is_ok() {
-        return Ok(());
+    if std::fs::hard_link(from, to).is_ok() {
+        return std::fs::remove_file(from).map_err(|e| io_err(from, e));
     }
     copy_then_remove(from, to)
 }
 
-/// The fallback half of [`move_file`], separated so it can be tested
-/// without two filesystems to hand.
-///
-/// The remove comes last on purpose: if it fails, the file still exists in
-/// both places, which is recoverable. Removing first and failing to copy
-/// would not be.
+/// Copy into a newly reserved destination before removing the source.
+/// Never follow a source symlink in this fallback: copying its target and
+/// deleting the link would silently change what a later restore returns.
 fn copy_then_remove(from: &Path, to: &Path) -> Result<()> {
-    std::fs::copy(from, to).map_err(|e| io_err(from, e))?;
+    let metadata = std::fs::symlink_metadata(from).map_err(|e| io_err(from, e))?;
+    if !metadata.is_file() {
+        return Err(io_err(
+            from,
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "cross-filesystem copy requires a regular file",
+            ),
+        ));
+    }
+    let mut source = std::fs::File::open(from).map_err(|e| io_err(from, e))?;
+    let mut destination = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(to)
+        .map_err(|e| io_err(to, e))?;
+    let copied = std::io::copy(&mut source, &mut destination)
+        .and_then(|_| destination.set_permissions(metadata.permissions()));
+    drop(destination);
+    if let Err(error) = copied {
+        // We created this entry; the source is still intact on copy failure.
+        let _ = std::fs::remove_file(to);
+        return Err(io_err(to, error));
+    }
+    // If removal fails, keep both copies rather than lose the original bytes.
     std::fs::remove_file(from).map_err(|e| io_err(from, e))
 }
 
@@ -790,6 +806,58 @@ mod tests {
 
         assert!(!from.exists());
         assert_eq!(std::fs::read(&to).unwrap(), b"data");
+    }
+
+    #[test]
+    fn neither_move_path_overwrites_an_existing_destination() {
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let from = dir.path().join("source");
+            let to = dir.path().join("occupied");
+            std::fs::write(&from, b"source bytes").unwrap();
+            std::fs::write(&to, b"existing bytes").unwrap();
+            assert!(mover(&from, &to).is_err());
+            assert_eq!(std::fs::read(&from).unwrap(), b"source bytes");
+            assert_eq!(std::fs::read(&to).unwrap(), b"existing bytes");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn neither_move_path_overwrites_a_dangling_symlink() {
+        for mover in [move_file, copy_then_remove] {
+            let dir = tempfile::tempdir().unwrap();
+            let from = dir.path().join("source");
+            let to = dir.path().join("occupied");
+            let missing = dir.path().join("missing");
+            std::fs::write(&from, b"source bytes").unwrap();
+            std::os::unix::fs::symlink(&missing, &to).unwrap();
+            assert!(mover(&from, &to).is_err());
+            assert_eq!(std::fs::read(&from).unwrap(), b"source bytes");
+            assert_eq!(std::fs::read_link(&to).unwrap(), missing);
+            assert!(!missing.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_fallback_preserves_permissions_and_rejects_symlink_sources() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("source");
+        let to = dir.path().join("destination");
+        let alias = dir.path().join("alias");
+        std::fs::write(&from, b"data").unwrap();
+        std::fs::set_permissions(&from, std::fs::Permissions::from_mode(0o640)).unwrap();
+        symlink(&from, &alias).unwrap();
+        assert!(copy_then_remove(&alias, &to).is_err());
+        assert!(std::fs::symlink_metadata(&alias).unwrap().is_symlink());
+        assert!(!to.exists());
+        copy_then_remove(&from, &to).unwrap();
+        assert_eq!(
+            std::fs::metadata(&to).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
     }
 
     #[test]
