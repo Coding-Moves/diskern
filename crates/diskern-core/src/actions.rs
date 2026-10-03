@@ -81,6 +81,15 @@ pub fn quarantine(
     verdict: Verdict,
     quarantine_dir: &Path,
 ) -> Result<QuarantineRecord> {
+    quarantine_at(file, verdict, quarantine_dir, now_epoch())
+}
+
+fn quarantine_at(
+    file: &Path,
+    verdict: Verdict,
+    quarantine_dir: &Path,
+    stamp: i64,
+) -> Result<QuarantineRecord> {
     match verdict {
         Verdict::Protected | Verdict::Risky => {
             return Err(GenomeError::Rules(format!(
@@ -93,7 +102,10 @@ pub fn quarantine(
 
     std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
 
-    let stamp = now_epoch();
+    // Hold the same lock as restore/purge through selection, movement and
+    // manifest append. Locking only the append lets two tasks select the
+    // same flattened name before either one has reserved it.
+    let _guard = manifest_lock();
     let record = QuarantineRecord {
         original: file.to_path_buf(),
         quarantined_to: unique_dest(quarantine_dir, stamp, file),
@@ -112,7 +124,6 @@ pub fn quarantine(
 
     // The move happened; the record must follow it or the move must not
     // stand. Anything else strands the file.
-    let _guard = manifest_lock();
     if let Err(e) = append_line(quarantine_dir, &line) {
         // Best effort, and the only sensible order: the original was
         // sitting here a moment ago, so putting it back is the outcome
@@ -930,6 +941,40 @@ mod tests {
         assert_eq!(std::fs::read(&ra.quarantined_to).unwrap(), b"first");
         assert_eq!(std::fs::read(&rb.quarantined_to).unwrap(), b"second");
         assert_eq!(list(&q).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn simultaneous_flattened_collisions_remain_individually_restorable() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = dir.path().join("quarantine");
+        let a = dir.path().join("a_b");
+        std::fs::create_dir(dir.path().join("a")).unwrap();
+        let b = dir.path().join("a/b");
+        std::fs::write(&a, b"first").unwrap();
+        std::fs::write(&b, b"second").unwrap();
+        let start = std::sync::Barrier::new(2);
+        // Force identical timestamps instead of depending on wall-clock
+        // scheduling. Both workers race for the same initial destination.
+        let (ra, rb) = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                quarantine_at(&a, Verdict::Safe, &q, 123).unwrap()
+            });
+            let second = scope.spawn(|| {
+                start.wait();
+                quarantine_at(&b, Verdict::Safe, &q, 123).unwrap()
+            });
+            (first.join().unwrap(), second.join().unwrap())
+        });
+        assert_ne!(ra.quarantined_to, rb.quarantined_to);
+        assert_eq!(std::fs::read(&ra.quarantined_to).unwrap(), b"first");
+        assert_eq!(std::fs::read(&rb.quarantined_to).unwrap(), b"second");
+        assert_eq!(list(&q).unwrap().len(), 2);
+        restore_from_manifest(&q, &ra.quarantined_to).unwrap();
+        restore_from_manifest(&q, &rb.quarantined_to).unwrap();
+        assert_eq!(std::fs::read(&a).unwrap(), b"first");
+        assert_eq!(std::fs::read(&b).unwrap(), b"second");
+        assert!(list(&q).unwrap().is_empty());
     }
 
     #[test]
