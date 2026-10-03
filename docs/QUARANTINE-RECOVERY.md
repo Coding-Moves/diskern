@@ -287,3 +287,77 @@ Never delete v2 storage merely to make an old version appear compatible.
 - **Use a database:** may simplify metadata transactions, but cannot atomically
   commit filesystem rename/unlink operations with the database. It still needs
   an intent/reconciliation protocol; evaluate only if scale justifies it.
+
+## Fault-injection plan
+
+Add a test-only boundary hook to the engine's filesystem adapter; production builds
+must not accept an environment variable that crashes or skips safety checks.
+A parent test starts a child action against disposable fixtures, waits for a named
+boundary notification, then kills the child without Rust unwinding. A fresh child
+runs reconciliation twice. A panic/caught error is not a substitute for termination.
+Use fixed fixture bytes, known digests, and explicitly coordinated barriers rather
+than sleeps or probabilistic races.
+
+| Boundary to interrupt | Required evidence after restart |
+| --- | --- |
+| Before/while first intent is written or before it is published | Source unchanged; no unrecorded move; partial records preserved but not trusted. |
+| After prepared record and directory sync | Original still available with a complete intent. |
+| Immediately after same-filesystem move, before state update | Verified payload becomes one completed recovery item with the original path. |
+| During cross-filesystem copy | Source survives; incomplete staging cannot be restored as complete or purged automatically. |
+| After file sync but before payload publication | Source survives; staging remains non-actionable. |
+| After payload publication but before `PayloadReady` | Both copies survive; recovery surfaces the uncertain operation. |
+| After `PayloadReady`, before source unlink | Both copies survive; no recovery-time unlink. |
+| After source unlink, before source-directory sync or commit | Valid payload and intent survive process termination; recovery can finalize. Test power loss separately. |
+| During each record replacement / after committed publication | Old or new complete record is reconciled; no duplicate restore row. |
+| During v2 restore/purge intent or terminal publication | Pending action is surfaced; no automatic overwrite or delete, and no re-quarantine of terminal records. |
+
+For every boundary, assert that at least one full copy of the expected bytes is
+retained (except an explicitly authorized completed purge), its original path
+remains available in validated evidence, and recovery never modifies unrelated
+sentinel files. Snapshot files and record counts before/after the second recovery
+to verify idempotence, including attention states.
+
+Also inject write failures, disk-full behavior, sync/rename/unlink failures,
+permission errors, broken symlinks, corrupt/unknown records, source recreation,
+payload modification, and operation-ID collisions. Force the cross-device branch
+through an adapter in portable tests; also run a real two-filesystem integration
+case where available. Test two independent processes using the writer lock as
+well as multiple threads. Run Linux, Windows, and macOS coverage. Check Windows
+path budgets with the additional directory layout.
+
+Power-loss claims require a separate filesystem/VM fault harness that can discard
+unsynchronized writes and interrupt the host, not just kill the application.
+Record platform, filesystem, synchronization primitive, and observed outcome.
+Do not promote a platform from process-crash-only to power-loss-safe based solely
+on unit tests or successful calls to the sync API.
+
+## Implementation sequence and release gates
+
+Each item should be a small, independently reviewable follow-up PR. This proposal
+is the design deliverable, not evidence that these steps have been implemented.
+
+1. Land #195's destination-safety fix with collision regressions. Agree on shared
+   no-replace primitives and lock ordering so recovery does not reintroduce it.
+2. Add versioned record parsing, storage validation, and read-only inspection.
+   Fixtures cover legacy data, unsupported versions, and corrupt records. Keep
+   new v2 writes disabled; no migration or new user-data mutations yet.
+3. Add per-directory OS locking and durable/no-replace filesystem adapters with
+   platform tests. Document unsupported filesystems and validate path budgets.
+4. Implement prepared/copy/rename/commit transitions and reconciliation behind a
+   disabled-by-default internal rollout gate. Add the kill-boundary tests before
+   exposing a new writer. Recovery must retain ambiguous files.
+5. Add v2 restore/purge intents and terminal states, plus their fault tests. Keep
+   legacy limitations explicit and retain format tags across list/action APIs.
+6. Wire recovery outcomes through the Tauri commands and desktop. Show pending
+   records separately, disable unsafe actions, and add interaction tests proving
+   no recovery UI click silently triggers purge or replaces another file.
+7. Enable v2 writes only after all supported-platform process-crash tests pass,
+   compatibility/downgrade instructions exist, and platform durability guarantees
+   are explicitly documented. Retain legacy reading. Handle future compaction
+   and migration in separate designs, not as opportunistic startup cleanup.
+
+Before implementation approval, settle the supported filesystem matrix, the
+minimum Rust/platform APIs for file identity and locking, and whether the first
+release can afford full-content verification at quarantine time. If performance
+requires a weaker identity scheme, revise its guarantees and tests explicitly;
+do not silently remove the digest or synchronization requirements.
