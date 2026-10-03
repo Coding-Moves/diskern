@@ -128,3 +128,10 @@ no frontend can accidentally weaken them.
 **AI is narration-only.** The optional `ai` feature explains findings in
 plain language; it can never change a verdict. This keeps the engine fully
 auditable and offline-capable.
+
+## Proposed quarantine recovery
+
+The [quarantine crash recovery proposal](QUARANTINE-RECOVERY.md) documents
+durable intent records, startup reconciliation, legacy compatibility, and a
+staged implementation/test plan for issue #196. It is a design proposal;
+the current engine does not yet implement this recovery protocol.
