@@ -135,9 +135,14 @@ not only the enum. Do not erase terminal records as part of startup recovery.
 2. Revalidate authority/source and move to `payload` with no-replace semantics.
    Only a confirmed cross-device error may select the copy protocol; permission
    or collision errors must not silently fall back to copying.
-3. Synchronize payload data and affected directories before publishing
-   `PayloadReady`, then `Committed`. The source has already moved in step 2,
-   so recovery must also handle a `Prepared` record with payload-only evidence.
+3. Synchronize payload data, then its destination directory. Only after both
+   succeed may the source parent directory be synchronized to persist removal
+   of the original name. Do not reorder or parallelize these barriers. Publish
+   `PayloadReady`, then `Committed`, after all required barriers succeed. If
+   any barrier fails, stop and retain the prepared record and available files
+   for recovery; do not continue to a later barrier or claim completion. The
+   source has already moved in step 2, so recovery must also handle a
+   `Prepared` record with payload-only evidence.
 4. Report success only after the committed record is published. If later record
    publication fails, return a recovery-required result with the operation ID;
    do not blindly move back over a potentially recreated source path.
@@ -171,7 +176,12 @@ A durable publication means: write all bytes to a fresh temp file, flush any
 userspace buffers, check `File::sync_all`, atomically replace `record.json`, then
 sync its parent directory. The initial directory tree and format marker also need
 parent synchronization. Source removal/rename requires syncing the source parent;
-destination publication requires syncing its parent. Same-filesystem source bytes
+destination publication requires syncing its parent. For a same-filesystem move
+between directories, the order is payload data, destination parent, then source
+parent. This must establish durable destination evidence before explicitly
+persisting source removal. This ordering is a requirement, not a universal proof
+of filesystem crash semantics: the platform adapter must also validate recovery
+from power loss before the first directory barrier completes. Same-filesystem source bytes
 must be synchronized before moving if the implementation promises power-loss
 preservation of the prepared content.
 
@@ -302,7 +312,8 @@ than sleeps or probabilistic races.
 | --- | --- |
 | Before/while first intent is written or before it is published | Source unchanged; no unrecorded move; partial records preserved but not trusted. |
 | After prepared record and directory sync | Original still available with a complete intent. |
-| Immediately after same-filesystem move, before state update | Verified payload becomes one completed recovery item with the original path. |
+| Immediately after same-filesystem move, before state update | Verified payload becomes one completed recovery item with the original path after process termination. Power-loss behavior before the destination barrier requires separate platform validation. |
+| Same-filesystem move: after payload and destination-directory sync, before source-directory sync | In the power-loss harness, the verified payload and prepared record survive. The original name may be present or absent; retain both if present, otherwise finalize recovery. A process kill alone cannot validate this durability boundary. |
 | During cross-filesystem copy | Source survives; incomplete staging cannot be restored as complete or purged automatically. |
 | After file sync but before payload publication | Source survives; staging remains non-actionable. |
 | After payload publication but before `PayloadReady` | Both copies survive; recovery surfaces the uncertain operation. |
@@ -319,7 +330,10 @@ to verify idempotence, including attention states.
 
 Also inject write failures, disk-full behavior, sync/rename/unlink failures,
 permission errors, broken symlinks, corrupt/unknown records, source recreation,
-payload modification, and operation-ID collisions. Force the cross-device branch
+payload modification, and operation-ID collisions. Assert the same-filesystem adapter's ordering:
+`sync(payload)` precedes `sync(destination parent)`, which precedes
+`sync(source parent)`. An injected failure at either earlier barrier must prevent
+the later barrier and committed publication. Force the cross-device branch
 through an adapter in portable tests; also run a real two-filesystem integration
 case where available. Test two independent processes using the writer lock as
 well as multiple threads. Run Linux, Windows, and macOS coverage. Check Windows
