@@ -98,7 +98,7 @@ fn quarantine_checked(
     verdict: Verdict,
     quarantine_dir: &Path,
     stamp: i64,
-    before_move: impl FnOnce() -> Result<()>,
+    before_move: impl Fn() -> Result<()>,
 ) -> Result<QuarantineRecord> {
     match verdict {
         Verdict::Protected | Verdict::Risky => {
@@ -110,12 +110,14 @@ fn quarantine_checked(
         Verdict::Safe | Verdict::Review => {}
     }
 
-    std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
-
     // Hold the same lock as restore/purge through selection, movement and
     // manifest append. Locking only the append lets two tasks select the
     // same flattened name before either one has reserved it.
     let _guard = manifest_lock();
+    // Reject an already stale request before making any filesystem changes.
+    // Repeat this check below in case authority changes during preparation.
+    before_move()?;
+    std::fs::create_dir_all(quarantine_dir).map_err(|e| io_err(quarantine_dir, e))?;
     let record = QuarantineRecord {
         original: file.to_path_buf(),
         quarantined_to: unique_dest(quarantine_dir, stamp, file),
@@ -167,8 +169,8 @@ pub fn quarantine_finding(
 /// Report-bound quarantine with a final authority check supplied by the
 /// caller. Tauri uses this to reject a lease invalidated by a newer scan
 /// without holding the report mutex over filesystem I/O. The callback runs
-/// under the manifest lock immediately before moving, so it must not call
-/// another action that acquires that lock.
+/// under the manifest lock before creating the directory and again immediately
+/// before moving, so it must not call another action that acquires that lock.
 pub fn quarantine_finding_with_authorization<F>(
     path: &Path,
     report: &report::Report,
@@ -768,6 +770,29 @@ mod tests {
             false
         });
         assert!(result.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"cache");
+        assert!(
+            !q.exists(),
+            "rejected requests must not create a quarantine directory"
+        );
+        assert!(list(&q).unwrap().is_empty());
+    }
+
+    #[test]
+    fn authority_invalidated_during_preparation_still_prevents_the_move() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let q = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+        let checks = std::cell::Cell::new(0);
+        let result = quarantine_finding_with_authorization(&target, &report, &rules, &q, || {
+            checks.set(checks.get() + 1);
+            checks.get() == 1
+        });
+        assert!(result.is_err());
+        assert_eq!(checks.get(), 2);
         assert_eq!(std::fs::read(&target).unwrap(), b"cache");
         assert!(list(&q).unwrap().is_empty());
     }
