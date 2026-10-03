@@ -90,6 +90,16 @@ fn quarantine_at(
     quarantine_dir: &Path,
     stamp: i64,
 ) -> Result<QuarantineRecord> {
+    quarantine_checked(file, verdict, quarantine_dir, stamp, || Ok(()))
+}
+
+fn quarantine_checked(
+    file: &Path,
+    verdict: Verdict,
+    quarantine_dir: &Path,
+    stamp: i64,
+    before_move: impl FnOnce() -> Result<()>,
+) -> Result<QuarantineRecord> {
     match verdict {
         Verdict::Protected | Verdict::Risky => {
             return Err(GenomeError::Rules(format!(
@@ -120,6 +130,9 @@ fn quarantine_at(
     // cannot be read back: the exact loss this manifest exists to stop.
     let line = encode(&record)?;
 
+    // A queued request may have waited behind a long copy. Validate its
+    // snapshot and authority only after that wait, immediately before moving.
+    before_move()?;
     move_file(file, &record.quarantined_to)?;
 
     // The move happened; the record must follow it or the move must not
@@ -153,7 +166,9 @@ pub fn quarantine_finding(
 
 /// Report-bound quarantine with a final authority check supplied by the
 /// caller. Tauri uses this to reject a lease invalidated by a newer scan
-/// without holding the report mutex over filesystem I/O.
+/// without holding the report mutex over filesystem I/O. The callback runs
+/// under the manifest lock immediately before moving, so it must not call
+/// another action that acquires that lock.
 pub fn quarantine_finding_with_authorization<F>(
     path: &Path,
     report: &report::Report,
@@ -184,14 +199,21 @@ where
         )));
     }
 
-    ensure_entry_is_current(&finding.entry)?;
-    if !still_authorized() {
-        return Err(GenomeError::Rules(
-            "scan report was superseded; refusing to quarantine — scan again".into(),
-        ));
-    }
-
-    quarantine(&finding.entry.path, effective_verdict, quarantine_dir)
+    quarantine_checked(
+        &finding.entry.path,
+        effective_verdict,
+        quarantine_dir,
+        now_epoch(),
+        || {
+            ensure_entry_is_current(&finding.entry)?;
+            if !still_authorized() {
+                return Err(GenomeError::Rules(
+                    "scan report was superseded; refusing to quarantine — scan again".into(),
+                ));
+            }
+            Ok(())
+        },
+    )
 }
 
 /// Check the metadata captured by the scanner, excluding atime.
@@ -690,6 +712,29 @@ mod tests {
         let record = quarantine_finding(&target, &report, &rules, &quarantine_dir).unwrap();
         assert!(!target.exists());
         assert!(record.quarantined_to.exists());
+    }
+
+    #[test]
+    fn final_authorization_runs_under_the_manifest_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cache.bin");
+        let q = dir.path().join("quarantine");
+        std::fs::write(&target, b"cache").unwrap();
+        let report = report_for(&target, Verdict::Review);
+        let rules = rules_with_verdict("**/cache.bin", Verdict::Review);
+        let result = quarantine_finding_with_authorization(&target, &report, &rules, &q, || {
+            assert!(
+                matches!(
+                    MANIFEST.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ),
+                "authority must be checked after waiting for other filesystem actions"
+            );
+            false
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"cache");
+        assert!(list(&q).unwrap().is_empty());
     }
 
     #[test]
