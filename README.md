@@ -1,5 +1,7 @@
 # Diskern
 
+Diskern is a [Coding Moves Product](https://codingmoves.netlify.app/products/).
+
 [![CI](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml/badge.svg)](https://github.com/Coding-Moves/diskern/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
